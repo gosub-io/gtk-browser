@@ -4,15 +4,17 @@ use crate::window::message::Message;
 use crate::{fetcher, runtime};
 use async_channel::{Receiver, Sender};
 use glib::subclass::InitializingObject;
+use gtk4::glib::subclass::Signal;
 use gtk4::glib::Quark;
-use gtk4::{glib, Button, CompositeTemplate, Entry, Image, Notebook, ScrolledWindow, Statusbar, TemplateChild, TextView, ToggleButton, Widget};
+use gtk4::prelude::*;
+use gtk4::subclass::prelude::*;
+use gtk4::{
+    glib, Button, CompositeTemplate, Entry, Image, Notebook, ScrolledWindow, Statusbar, TemplateChild, TextView, ToggleButton, Widget,
+};
 use log::info;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use std::sync::Mutex;
-use gtk4::glib::subclass::Signal;
-use gtk4::prelude::*;
-use gtk4::subclass::prelude::*;
 
 // Create a static Quark as a unique key
 static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
@@ -32,13 +34,9 @@ impl<T: IsA<Widget>> WidgetExtTabId for T {
     }
 
     fn get_tab_id(&self) -> Option<TabId> {
-        unsafe {
-            self.qdata::<TabId>(*TAB_ID_QUARK).map(|ptr| *ptr.as_ref())
-        }
+        unsafe { self.qdata::<TabId>(*TAB_ID_QUARK).map(|ptr| *ptr.as_ref()) }
     }
 }
-
-
 
 #[derive(CompositeTemplate)]
 #[template(resource = "/io/gosub/browser-gtk/ui/window.ui")]
@@ -105,8 +103,7 @@ impl ObjectSubclass for BrowserWindow {
 
 impl ObjectImpl for BrowserWindow {
     fn signals() -> &'static [Signal] {
-        static SIGNALS: Lazy<Vec<Signal>> =
-            Lazy::new(|| vec![Signal::builder("update-tabs").build()]);
+        static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| vec![Signal::builder("update-tabs").build()]);
 
         SIGNALS.as_ref()
     }
@@ -155,48 +152,29 @@ impl BrowserWindow {
     #[template_callback]
     fn handle_refresh_clicked(&self, _btn: &Button) {
         self.log("Refreshing the current page");
-        self.statusbar
-            .push(1, "We want to refresh the current page");
+        self.statusbar.push(1, "We want to refresh the current page");
     }
 
     #[template_callback]
     async fn handle_searchbar_clicked(&self, entry: &Entry) {
-        let tab_id = self
-            .tab_manager
-            .lock()
-            .unwrap()
-            .get_active_tab()
-            .unwrap()
-            .id()
-            .clone();
+        let tab_id = self.tab_manager.lock().unwrap().get_active_tab().unwrap().id().clone();
 
         self.log(format!("Visiting the URL {}", entry.text().as_str()).as_str());
-        self.statusbar.push(
-            1,
-            format!("Oh yeah.. full speed ahead to {}", entry.text().as_str()).as_str(),
-        );
+        self.statusbar
+            .push(1, format!("Oh yeah.. full speed ahead to {}", entry.text().as_str()).as_str());
 
         let binding = entry.text();
         if binding.starts_with("about:") {
             // About: pages are special, we don't need to prefix them with a protocol
-            self.sender
-                .send(Message::LoadUrl(tab_id, binding.to_string()))
-                .await
-                .unwrap();
+            self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
             return;
         } else if binding.starts_with("http://") || binding.starts_with("https://") {
             // https:// and http:// protocols are loaded as-is
-            self.sender
-                .send(Message::LoadUrl(tab_id, binding.to_string()))
-                .await
-                .unwrap();
+            self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
         } else {
             // No protocol, we use https:// as a prefix
             let url = format!("https://{}", binding);
-            self.sender
-                .send(Message::LoadUrl(tab_id, url))
-                .await
-                .unwrap();
+            self.sender.send(Message::LoadUrl(tab_id, url)).await.unwrap();
         };
     }
 }
@@ -224,10 +202,7 @@ impl BrowserWindow {
     }
 
     pub(crate) fn refresh_tabs(&self) {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
         rt.block_on(self.refresh_tabs_async())
     }
@@ -249,17 +224,18 @@ impl BrowserWindow {
                 }
                 TabCommand::Insert(page_num) => {
                     let manager = self.tab_manager.lock().unwrap();
-                    let tab = manager
-                        .get_tab(manager.page_to_tab(page_num).unwrap())
-                        .unwrap()
-                        .clone();
+                    let tab = manager.get_tab(manager.page_to_tab(page_num).unwrap()).unwrap().clone();
                     drop(manager);
 
                     let label = self.create_tab_label(tab.is_loading(), &tab);
                     let default_page = self.generate_default_page();
                     default_page.set_tab_id(tab.id());
-                    self.tab_bar
-                        .insert_page(&default_page, Some(&label), Some(page_num));
+                    self.tab_bar.insert_page(&default_page, Some(&label), Some(page_num));
+
+                    // We can reorder tab, unless it's pinned/sticky
+                    if let Some(page) = self.tab_bar.nth_page(Some(page_num)) {
+                        self.tab_bar.set_tab_reorderable(&page, !tab.is_sticky());
+                    }
                 }
                 TabCommand::Close(page_num) => {
                     self.tab_bar.remove_page(Some(page_num));
@@ -277,19 +253,8 @@ impl BrowserWindow {
                 TabCommand::Unpin(_) => {}
                 TabCommand::Private(_) => {}
                 TabCommand::Update(page_num) => {
-                    //     let manager = self.tab_manager.lock().unwrap();
-                    //     let tab = manager.get_tab(manager.page_to_tab(page_num).unwrap()).unwrap().clone();
-                    //     drop(manager);
-                    //     let label = self.create_tab_label(false, &tab);
-                    //     let page_child = self.tab_bar.nth_page(Some(page_num)).unwrap();
-                    //     self.tab_bar.set_tab_label(&page_child, Some(&label));
-                    // }
-                    // TabCommand::UpdateContent(page_num) => {
                     let manager = self.tab_manager.lock().unwrap();
-                    let tab = manager
-                        .get_tab(manager.page_to_tab(page_num).unwrap())
-                        .unwrap()
-                        .clone();
+                    let tab = manager.get_tab(manager.page_to_tab(page_num).unwrap()).unwrap().clone();
                     drop(manager);
 
                     let scrolled_window = gtk4::ScrolledWindow::builder()
@@ -298,10 +263,7 @@ impl BrowserWindow {
                         .vexpand(true)
                         .build();
 
-                    let content = TextView::builder()
-                        .editable(false)
-                        .wrap_mode(gtk4::WrapMode::Word)
-                        .build();
+                    let content = TextView::builder().editable(false).wrap_mode(gtk4::WrapMode::Word).build();
                     content.buffer().set_text(&tab.content());
                     scrolled_window.set_child(Some(&content));
                     scrolled_window.set_tab_id(tab.id());
@@ -311,9 +273,13 @@ impl BrowserWindow {
                     // We need to remove the page, and read it in order to change the page content. Also,
                     // we must make sure we select the tab again.
                     self.tab_bar.remove_page(Some(page_num));
-                    self.tab_bar
-                        .insert_page(&scrolled_window, Some(&tab_label), Some(page_num));
+                    let page_id = self.tab_bar.insert_page(&scrolled_window, Some(&tab_label), Some(page_num));
                     self.tab_bar.set_current_page(Some(page_num));
+
+                    // We can reorder tab, unless it's pinned/sticky
+                    if let Some(page) = self.tab_bar.nth_page(Some(page_id)) {
+                        self.tab_bar.set_tab_reorderable(&page, !tab.is_sticky());
+                    }
                 }
             }
         }
@@ -360,10 +326,7 @@ impl BrowserWindow {
             tab_btn.connect_clicked(move |_| {
                 info!("Clicked close button for tab {}", tab_id);
                 window_clone.imp().close_tab(tab_id);
-                _ = window_clone
-                    .imp()
-                    .get_sender()
-                    .send_blocking(Message::RefreshTabs());
+                _ = window_clone.imp().get_sender().send_blocking(Message::RefreshTabs());
             });
 
             label_vbox.append(&tab_btn);
@@ -409,10 +372,7 @@ impl BrowserWindow {
             } else {
                 fetcher::fetch_favicon(url.as_str()).await
             };
-            sender_clone
-                .send(Message::FaviconLoaded(tab_id, favicon))
-                .await
-                .unwrap();
+            sender_clone.send(Message::FaviconLoaded(tab_id, favicon)).await.unwrap();
         });
     }
 
@@ -426,10 +386,7 @@ impl BrowserWindow {
         runtime().spawn(async move {
             if url.starts_with("about:") {
                 let html_content = load_about_url(url);
-                sender_clone
-                    .send(Message::UrlLoaded(tab_id, html_content))
-                    .await
-                    .unwrap();
+                sender_clone.send(Message::UrlLoaded(tab_id, html_content)).await.unwrap();
                 return;
             }
 

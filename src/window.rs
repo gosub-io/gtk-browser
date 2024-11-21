@@ -113,7 +113,7 @@ impl BrowserWindow {
 
         tab_bar.connect_page_removed({
             let window_clone = window.clone();
-            move |_notebook, _, page_num| {
+            move |_notebook, _widget, page_num| {
                 window_clone
                     .imp()
                     .log(format!("[result] removed tab: {}", page_num).as_str());
