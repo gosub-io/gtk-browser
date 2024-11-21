@@ -1,19 +1,17 @@
 use crate::dialog::about::About;
-use crate::window::BrowserWindow;
 use crate::APP_ID;
-use adw::glib::clone;
-use adw::subclass::prelude::GtkApplicationImpl;
-use adw::{ColorScheme, StyleManager};
+use gtk4::glib::clone;
+use gtk4::subclass::prelude::GtkApplicationImpl;
 use gtk4::{gio, glib, prelude::*, subclass::prelude::*};
 use gtk_macros::action;
 use log::info;
+use crate::window::BrowserWindow;
 
 mod imp {
     use super::*;
     use crate::window::BrowserWindow;
 
-    pub struct Application {
-    }
+    pub struct Application {}
 
     #[glib::object_subclass]
     impl ObjectSubclass for Application {
@@ -61,7 +59,8 @@ mod imp {
 
 glib::wrapper! {
     pub struct Application(ObjectSubclass<imp::Application>)
-        @extends gio::Application, gtk4::Application, adw::Application, @implements gio::ActionMap, gio::ActionGroup;
+        @extends gio::Application, gtk4::Application,
+        @implements gio::ActionMap, gio::ActionGroup;
 }
 
 impl Application {
@@ -91,12 +90,12 @@ impl Application {
             self,
             move |_, _| {
                 info!("Toggle dark mode action triggered");
-                let mgr = StyleManager::default();
-                if mgr.is_dark() {
-                    mgr.set_color_scheme(ColorScheme::ForceLight);
-                } else {
-                    mgr.set_color_scheme(ColorScheme::ForceDark);
-                }
+                // let mgr = StyleManager::default();
+                // if mgr.is_dark() {
+                //     mgr.set_color_scheme(ColorScheme::ForceLight);
+                // } else {
+                //     mgr.set_color_scheme(ColorScheme::ForceDark);
+                // }
             })
         );
 

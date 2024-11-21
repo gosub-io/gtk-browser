@@ -1,18 +1,42 @@
-use adw::{prelude::*, subclass::prelude::*, ColorScheme, StyleManager};
-use adw::gtk;
-use std::sync::Arc;
-use adw::glib::subclass::Signal;
-use glib::subclass::InitializingObject;
-use gtk4::{glib, Entry, Button, Statusbar, CompositeTemplate, TextView, ToggleButton, Notebook, Image, ScrolledWindow};
-use log::info;
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
-use async_channel::{Receiver, Sender};
-use uuid::Uuid;
-use crate::tab::{GosubTab, GosubTabManager, TabCommand};
-use crate::{fetcher, runtime};
+use crate::tab::{GosubTab, GosubTabManager, TabCommand, TabId};
 use crate::utils::convert_to_pixbuf;
 use crate::window::message::Message;
+use crate::{fetcher, runtime};
+use async_channel::{Receiver, Sender};
+use glib::subclass::InitializingObject;
+use gtk4::glib::subclass::Signal;
+use gtk4::glib::Quark;
+use gtk4::prelude::*;
+use gtk4::subclass::prelude::*;
+use gtk4::{
+    glib, Button, CompositeTemplate, Entry, Image, Notebook, ScrolledWindow, Statusbar, TemplateChild, TextView, ToggleButton, Widget,
+};
+use log::info;
+use once_cell::sync::Lazy;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+// Create a static Quark as a unique key
+static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
+
+pub trait WidgetExtTabId {
+    fn set_tab_id(&self, tab_id: TabId);
+    fn get_tab_id(&self) -> Option<TabId>;
+}
+
+impl<T: IsA<Widget>> WidgetExtTabId for T {
+    fn set_tab_id(&self, tab_id: TabId) {
+        unsafe {
+            // - 'tab_id' is of type 'TabId', which is 'Copy' and 'static'.
+            // - We ensure that the same type is used when retrieving the data.
+            self.set_qdata(*TAB_ID_QUARK, tab_id);
+        }
+    }
+
+    fn get_tab_id(&self) -> Option<TabId> {
+        unsafe { self.qdata::<TabId>(*TAB_ID_QUARK).map(|ptr| *ptr.as_ref()) }
+    }
+}
 
 #[derive(CompositeTemplate)]
 #[template(resource = "/io/gosub/browser-gtk/ui/window.ui")]
@@ -61,7 +85,6 @@ impl BrowserWindow {
     }
 }
 
-
 #[glib::object_subclass]
 impl ObjectSubclass for BrowserWindow {
     const NAME: &'static str = "BrowserWindow";
@@ -80,12 +103,7 @@ impl ObjectSubclass for BrowserWindow {
 
 impl ObjectImpl for BrowserWindow {
     fn signals() -> &'static [Signal] {
-        static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| {
-            vec![
-                Signal::builder("update-tabs")
-                    .build(),
-            ]
-        });
+        static SIGNALS: Lazy<Vec<Signal>> = Lazy::new(|| vec![Signal::builder("update-tabs").build()]);
 
         SIGNALS.as_ref()
     }
@@ -103,7 +121,6 @@ impl ApplicationWindowImpl for BrowserWindow {}
 
 #[gtk4::template_callbacks]
 impl BrowserWindow {
-
     #[template_callback]
     fn handle_new_tab(&self, _btn: &Button) {
         todo!("not yet implemented");
@@ -124,12 +141,12 @@ impl BrowserWindow {
         self.log("Toggling dark mode");
 
         info!("Toggle dark mode action triggered");
-        let mgr = StyleManager::default();
-        if mgr.is_dark() {
-            mgr.set_color_scheme(ColorScheme::ForceLight);
-        } else {
-            mgr.set_color_scheme(ColorScheme::ForceDark);
-        }
+        // let mgr = StyleManager::default();
+        // if mgr.is_dark() {
+        //     mgr.set_color_scheme(ColorScheme::ForceLight);
+        // } else {
+        //     mgr.set_color_scheme(ColorScheme::ForceDark);
+        // }
     }
 
     #[template_callback]
@@ -143,7 +160,8 @@ impl BrowserWindow {
         let tab_id = self.tab_manager.lock().unwrap().get_active_tab().unwrap().id().clone();
 
         self.log(format!("Visiting the URL {}", entry.text().as_str()).as_str());
-        self.statusbar.push(1, format!("Oh yeah.. full speed ahead to {}", entry.text().as_str()).as_str());
+        self.statusbar
+            .push(1, format!("Oh yeah.. full speed ahead to {}", entry.text().as_str()).as_str());
 
         let binding = entry.text();
         if binding.starts_with("about:") {
@@ -158,7 +176,6 @@ impl BrowserWindow {
             let url = format!("https://{}", binding);
             self.sender.send(Message::LoadUrl(tab_id, url)).await.unwrap();
         };
-
     }
 }
 
@@ -175,20 +192,17 @@ impl BrowserWindow {
         self.log.scroll_to_mark(&mark, 0.0, true, 0.0, 1.0);
     }
 
-    pub(crate) fn close_tab(&self, tab_id: Uuid) {
+    pub(crate) fn close_tab(&self, tab_id: TabId) {
         let mut manager = self.tab_manager.lock().unwrap();
         if manager.tab_count() == 1 {
             self.log("Cannot close the last tab");
-            return
+            return;
         }
         manager.remove_tab(tab_id);
     }
 
     pub(crate) fn refresh_tabs(&self) {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
         rt.block_on(self.refresh_tabs_async())
     }
@@ -215,7 +229,13 @@ impl BrowserWindow {
 
                     let label = self.create_tab_label(tab.is_loading(), &tab);
                     let default_page = self.generate_default_page();
+                    default_page.set_tab_id(tab.id());
                     self.tab_bar.insert_page(&default_page, Some(&label), Some(page_num));
+
+                    // We can reorder tab, unless it's pinned/sticky
+                    if let Some(page) = self.tab_bar.nth_page(Some(page_num)) {
+                        self.tab_bar.set_tab_reorderable(&page, !tab.is_sticky());
+                    }
                 }
                 TabCommand::Close(page_num) => {
                     self.tab_bar.remove_page(Some(page_num));
@@ -233,14 +253,6 @@ impl BrowserWindow {
                 TabCommand::Unpin(_) => {}
                 TabCommand::Private(_) => {}
                 TabCommand::Update(page_num) => {
-                //     let manager = self.tab_manager.lock().unwrap();
-                //     let tab = manager.get_tab(manager.page_to_tab(page_num).unwrap()).unwrap().clone();
-                //     drop(manager);
-                //     let label = self.create_tab_label(false, &tab);
-                //     let page_child = self.tab_bar.nth_page(Some(page_num)).unwrap();
-                //     self.tab_bar.set_tab_label(&page_child, Some(&label));
-                // }
-                // TabCommand::UpdateContent(page_num) => {
                     let manager = self.tab_manager.lock().unwrap();
                     let tab = manager.get_tab(manager.page_to_tab(page_num).unwrap()).unwrap().clone();
                     drop(manager);
@@ -251,20 +263,23 @@ impl BrowserWindow {
                         .vexpand(true)
                         .build();
 
-                    let content = TextView::builder()
-                        .editable(false)
-                        .wrap_mode(gtk4::WrapMode::Word)
-                        .build();
+                    let content = TextView::builder().editable(false).wrap_mode(gtk4::WrapMode::Word).build();
                     content.buffer().set_text(&tab.content());
                     scrolled_window.set_child(Some(&content));
+                    scrolled_window.set_tab_id(tab.id());
 
                     let tab_label = self.create_tab_label(false, &tab);
 
                     // We need to remove the page, and read it in order to change the page content. Also,
                     // we must make sure we select the tab again.
                     self.tab_bar.remove_page(Some(page_num));
-                    self.tab_bar.insert_page(&scrolled_window, Some(&tab_label), Some(page_num));
+                    let page_id = self.tab_bar.insert_page(&scrolled_window, Some(&tab_label), Some(page_num));
                     self.tab_bar.set_current_page(Some(page_num));
+
+                    // We can reorder tab, unless it's pinned/sticky
+                    if let Some(page) = self.tab_bar.nth_page(Some(page_id)) {
+                        self.tab_bar.set_tab_reorderable(&page, !tab.is_sticky());
+                    }
                 }
             }
         }
@@ -278,12 +293,12 @@ impl BrowserWindow {
     }
 
     /// generates a tab label based on the tab info
-    fn create_tab_label(&self, is_loading: bool, tab: &GosubTab) -> gtk::Box {
-        let label_vbox = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+    fn create_tab_label(&self, is_loading: bool, tab: &GosubTab) -> gtk4::Box {
+        let label_vbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 5);
 
         // When the tab is loading, we show a spinner
         if is_loading {
-            let spinner = gtk::Spinner::new();
+            let spinner = gtk4::Spinner::new();
             spinner.start();
             label_vbox.append(&spinner);
         } else if let Some(favicon) = &tab.favicon() {
@@ -292,11 +307,11 @@ impl BrowserWindow {
 
         // Only show the title and close button if the tab is not sticky
         if !tab.is_sticky() {
-            let tab_label = gtk::Label::new(Some(tab.title()));
+            let tab_label = gtk4::Label::new(Some(tab.title()));
             label_vbox.append(&tab_label);
 
             let tab_btn = Button::builder()
-                .halign(gtk::Align::End)
+                .halign(gtk4::Align::End)
                 .has_frame(false)
                 .margin_bottom(0)
                 .margin_end(0)
@@ -324,15 +339,15 @@ impl BrowserWindow {
         let img = Image::from_resource("/io/gosub/browser-gtk/assets/submarine.svg");
         img.set_visible(true);
         img.set_focusable(false);
-        img.set_valign(gtk::Align::Center);
+        img.set_valign(gtk4::Align::Center);
         img.set_margin_top(64);
         img.set_pixel_size(500);
         img.set_hexpand(true);
 
-        let vbox = gtk4::Box::new(gtk::Orientation::Vertical, 0);
+        let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         vbox.set_visible(true);
         vbox.set_can_focus(false);
-        vbox.set_halign(gtk::Align::Center);
+        vbox.set_halign(gtk4::Align::Center);
         vbox.set_vexpand(true);
         vbox.set_hexpand(true);
 
@@ -341,7 +356,7 @@ impl BrowserWindow {
         vbox
     }
 
-    fn load_favicon_async(&self, tab_id: Uuid) {
+    fn load_favicon_async(&self, tab_id: TabId) {
         info!("Fetching favicon for tab: {}", tab_id);
 
         let manager = self.tab_manager.lock().unwrap();
@@ -361,7 +376,7 @@ impl BrowserWindow {
         });
     }
 
-    fn load_url_async(&self, tab_id: Uuid) {
+    fn load_url_async(&self, tab_id: TabId) {
         let manager = self.tab_manager.lock().unwrap();
         let tab = manager.get_tab(tab_id).unwrap();
         let url = tab.url().to_string();
@@ -379,11 +394,17 @@ impl BrowserWindow {
                 Ok(content) => {
                     let html_content = String::from_utf8_lossy(content.as_slice());
                     // we get a Cow.. and we clone it into the url?
-                    sender_clone.send(Message::UrlLoaded(tab_id, html_content.to_string())).await.unwrap();
+                    sender_clone
+                        .send(Message::UrlLoaded(tab_id, html_content.to_string()))
+                        .await
+                        .unwrap();
                 }
                 Err(e) => {
                     log::error!("Failed to fetch URL: {}", e);
-                    sender_clone.send(Message::Log(format!("Failed to fetch URL: {}", e))).await.unwrap();
+                    sender_clone
+                        .send(Message::Log(format!("Failed to fetch URL: {}", e)))
+                        .await
+                        .unwrap();
                 }
             }
         });
@@ -443,7 +464,6 @@ impl BrowserWindow {
                 // Now, load favicon and url content
                 self.load_favicon_async(tab_id);
                 self.load_url_async(tab_id);
-
             }
             Message::FaviconLoaded(tab_id, favicon) => {
                 if favicon.is_empty() {
@@ -497,8 +517,7 @@ impl BrowserWindow {
 
 fn load_about_url(url: String) -> String {
     match url.as_str() {
-        "about:blank" => {
-            r#"
+        "about:blank" => r#"
             <html>
                 <head>
                     <title>Blank page</title>
@@ -509,10 +528,8 @@ fn load_about_url(url: String) -> String {
                 </body>
             </html>
             "#
-            .to_string()
-        }
-        _ => {
-            r#"
+        .to_string(),
+        _ => r#"
             <html>
                 <head>
                     <title>Unknown about: page</title>
@@ -523,7 +540,6 @@ fn load_about_url(url: String) -> String {
                 </body>
             </html>
             "#
-            .to_string()
-        }
+        .to_string(),
     }
 }
