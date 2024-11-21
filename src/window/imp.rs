@@ -1,5 +1,4 @@
 use crate::tab::{GosubTab, GosubTabManager, TabCommand, TabId};
-use crate::utils::convert_to_pixbuf;
 use crate::window::message::Message;
 use crate::{fetcher, runtime};
 use async_channel::{Receiver, Sender};
@@ -8,7 +7,7 @@ use gtk4::glib::subclass::Signal;
 use gtk4::glib::Quark;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{glib, Button, CompositeTemplate, Entry, Image, Notebook, ScrolledWindow, Settings, Statusbar, TemplateChild, TextView, ToggleButton, Widget};
+use gtk4::{gdk, glib, Button, CompositeTemplate, Entry, Image, Notebook, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
 use log::info;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
@@ -44,8 +43,6 @@ pub struct BrowserWindow {
     #[template_child]
     pub tab_bar: TemplateChild<Notebook>,
     #[template_child]
-    pub statusbar: TemplateChild<Statusbar>,
-    #[template_child]
     pub log_scroller: TemplateChild<ScrolledWindow>,
     #[template_child]
     pub log: TemplateChild<TextView>,
@@ -62,7 +59,6 @@ impl Default for BrowserWindow {
         Self {
             searchbar: TemplateChild::default(),
             tab_bar: TemplateChild::default(),
-            statusbar: TemplateChild::default(),
             log_scroller: TemplateChild::default(),
             log: TemplateChild::default(),
 
@@ -109,7 +105,6 @@ impl ObjectImpl for BrowserWindow {
     fn constructed(&self) {
         self.parent_constructed();
         self.log("Browser created...");
-        self.statusbar.push(1, "Ready to roll...");
     }
 }
 
@@ -146,7 +141,6 @@ impl BrowserWindow {
     #[template_callback]
     fn handle_refresh_clicked(&self, _btn: &Button) {
         self.log("Refreshing the current page");
-        self.statusbar.push(1, "We want to refresh the current page");
     }
 
     #[template_callback]
@@ -154,8 +148,6 @@ impl BrowserWindow {
         let tab_id = self.tab_manager.lock().unwrap().get_active_tab().unwrap().id().clone();
 
         self.log(format!("Visiting the URL {}", entry.text().as_str()).as_str());
-        self.statusbar
-            .push(1, format!("Oh yeah.. full speed ahead to {}", entry.text().as_str()).as_str());
 
         let binding = entry.text();
         if binding.starts_with("about:") {
@@ -296,7 +288,7 @@ impl BrowserWindow {
             spinner.start();
             label_vbox.append(&spinner);
         } else if let Some(favicon) = &tab.favicon() {
-            label_vbox.append(&Image::from_pixbuf(Some(&favicon.clone())));
+            label_vbox.append(&Image::from_paintable(Some(&favicon.clone())));
         }
 
         // Only show the title and close button if the tab is not sticky
@@ -459,8 +451,8 @@ impl BrowserWindow {
                 self.load_favicon_async(tab_id);
                 self.load_url_async(tab_id);
             }
-            Message::FaviconLoaded(tab_id, favicon) => {
-                if favicon.is_empty() {
+            Message::FaviconLoaded(tab_id, buf) => {
+                if buf.is_empty() {
                     self.log(format!("no favicon found for tab {}", tab_id).as_str());
                     return;
                 }
@@ -469,11 +461,14 @@ impl BrowserWindow {
                 let mut tab = manager.get_tab(tab_id).unwrap().clone();
                 drop(manager);
 
-                match convert_to_pixbuf(favicon.as_slice()) {
-                    Ok(pixbuf) => tab.set_favicon(Some(pixbuf)),
+                let bytes = glib::Bytes::from(buf.as_slice());
+                match gdk::Texture::from_bytes(&bytes) {
+                    Ok(texture) => {
+                        tab.set_favicon(Some(texture));
+                    }
                     Err(e) => {
-                        log::error!("Failed to convert favicon to pixbuf: {}", e);
-                        self.log(format!("Failed to convert favicon to pixbuf: {}", e).as_str());
+                        log::error!("Failed to load favicon into buffer: {}", e);
+                        self.log(format!("Failed to load favicon into buffer: {}", e).as_str());
                     }
                 }
 

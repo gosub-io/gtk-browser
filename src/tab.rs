@@ -1,9 +1,8 @@
 use std::collections::HashMap;
-use gtk4::gdk_pixbuf::Pixbuf;
 use uuid::Uuid;
 use std::fmt;
 use std::str::FromStr;
-
+use gtk4::gdk::Texture;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct TabId(Uuid);
@@ -50,7 +49,7 @@ pub struct GosubTab {
     /// Title of the tab
     title: String,
     /// Loaded favicon of the tab
-    favicon: Option<Pixbuf>,
+    favicon: Option<Texture>,
     /// Actual content (HTML) of the tab
     content: String,
 }
@@ -126,11 +125,11 @@ impl GosubTab {
         self.title = title.to_string();
     }
 
-    pub(crate) fn favicon(&self) -> Option<Pixbuf> {
+    pub(crate) fn favicon(&self) -> Option<Texture> {
         self.favicon.clone()
     }
 
-    pub fn set_favicon(&mut self, favicon: Option<Pixbuf>) {
+    pub fn set_favicon(&mut self, favicon: Option<Texture>) {
         self.favicon = favicon;
     }
 }
