@@ -1,17 +1,16 @@
-use adw::gio::SimpleAction;
-use adw::gtk;
 use gtk4::glib::{clone, spawn_future_local};
-use gtk::glib;
+use gtk4::glib;
 
 mod imp;
 mod message;
 
 use crate::application::Application;
-use gtk::gio;
-use gtk::prelude::GtkWindowExt;
-use gtk::prelude::*;
-use gtk::subclass::prelude::ObjectSubclassIsExt;
+use gtk4::gio;
+use gtk4::gio::SimpleAction;
+use gtk4::prelude::*;
+use gtk4::subclass::prelude::ObjectSubclassIsExt;
 use crate::runtime;
+use crate::window::imp::WidgetExtTabId;
 use crate::window::message::Message;
 
 // This wrapper must be in a different module than the implementation, because both will define a
@@ -19,8 +18,8 @@ use crate::window::message::Message;
 // its implementation.
 glib::wrapper! {
     pub struct BrowserWindow(ObjectSubclass<imp::BrowserWindow>)
-        @extends gtk::ApplicationWindow, gtk::Window, gtk::Widget,
-        @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Native, gtk::Root, gtk::ShortcutManager;
+        @extends gtk4::ApplicationWindow, gtk4::Window, gtk4::Widget,
+        @implements gio::ActionGroup, gio::ActionMap, gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget, gtk4::Native, gtk4::Root, gtk4::ShortcutManager;
 }
 
 impl BrowserWindow {
@@ -31,7 +30,7 @@ impl BrowserWindow {
         window.set_decorated(true);
         window.set_default_size(1024, 768);
 
-        let builder = gtk::Builder::from_resource("/io/gosub/browser-gtk/ui/main_menu.ui");
+        let builder = gtk4::Builder::from_resource("/io/gosub/browser-gtk/ui/main_menu.ui");
         let menubar = builder
             .object::<gio::MenuModel>("app-menu")
             .expect("Could not find app-menu");
@@ -123,10 +122,10 @@ impl BrowserWindow {
 
         tab_bar.connect_page_reordered({
             let window_clone = window.clone();
-            move |_notebook, _, page_num| {
+            move |_notebook, page, page_num| {
                 window_clone
                     .imp()
-                    .log(format!("[result] reordered tab: {}", page_num).as_str());
+                    .log(format!("[result] reordered tab: [{:?}] to {}", page.get_tab_id(), page_num).as_str());
             }
         });
 

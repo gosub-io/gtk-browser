@@ -1,20 +1,19 @@
-use adw::gtk;
-use gtk::gdk::Texture;
-use gtk::gdk_pixbuf::Pixbuf;
+use gtk4::gdk::Texture;
+use gtk4::gdk_pixbuf::Pixbuf;
 
 #[allow(unused)]
 pub struct About;
 
 impl About {
     #[allow(unused)]
-    pub fn new() -> gtk::AboutDialog {
-        let about = gtk::AboutDialog::new();
+    pub fn new() -> gtk4::AboutDialog {
+        let about = gtk4::AboutDialog::new();
         about.set_program_name("Gosub Browser".into());
         about.set_version(Some("0.0.1"));
         about.set_website(Some("https://www.gosub.io".into()));
         about.set_website_label("Gosub Website");
         about.set_copyright(Some("© 2024 Gosub Team"));
-        about.set_license_type(gtk::License::MitX11);
+        about.set_license_type(gtk4::License::MitX11);
         // about.set_logo_icon_name(Some("gosub"));
 
         if let Ok(logo_pixbuf) = Pixbuf::from_resource_at_scale(

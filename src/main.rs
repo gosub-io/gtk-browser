@@ -6,8 +6,8 @@ mod application;
 mod utils;
 
 use std::sync::OnceLock;
-use adw::gdk::Display;
-use adw::prelude::ApplicationExt;
+use gtk4::gdk::Display;
+use gtk4::prelude::ApplicationExt;
 use gtk4::{gio, CssProvider};
 use tokio::runtime::Runtime;
 use crate::application::Application;

@@ -1,17 +1,17 @@
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-use uuid::Uuid;
+use crate::tab::TabId;
 
 pub enum Message {
     // Open a new tab, and load a URL
     OpenTab(String),
     /// Sent when we need to load a new url into a tab
-    LoadUrl(Uuid, String),
+    LoadUrl(TabId, String),
 
     /// Sent when a favicon has been loaded for tab X
-    FaviconLoaded(Uuid, Vec<u8>),
+    FaviconLoaded(TabId, Vec<u8>),
     // Sent when a URL has been loaded for tab X
-    UrlLoaded(Uuid, String),
+    UrlLoaded(TabId, String),
     // Refresh tabs
     RefreshTabs(),
 
