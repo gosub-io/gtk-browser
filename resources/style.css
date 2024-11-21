@@ -1,0 +1,8 @@
+notebook stack {
+    background-color: #ccc;
+}
+
+/* This should only work for the splashscreen, not all windows */
+/*window {*/
+/*    background-color: rgba(0, 0, 0, 0); !* Fully transparent background *!*/
+/*}*/

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <template class="BrowserWindow" parent="GtkApplicationWindow">
+        <property name="title">Gosub UserAgent - Browser - v0.0.1</property>
+
+        <child type="titlebar">
+            <object class="GtkHeaderBar" id="headerbar">
+                <property name="show-title-buttons">True</property>
+            </object>
+        </child>
+
+    <!-- main menu here -->
+
+        <child>
+            <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="margin-top">12</property>
+                <child>
+    <!-- url bar -->
+                    <object class="GtkBox">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">5</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <child>
+                            <object class="GtkButton" id="btn_prev">
+                                <signal name="clicked" handler="handle_prev_clicked" swapped="true"/>
+                                <child>
+                                    <object class="GtkImage">
+                                        <property name="icon-name">go-previous</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkButton" id="btn_next">
+                                <child>
+                                    <object class="GtkImage">
+                                        <property name="icon-name">go-next</property>
+                                        <property name="sensitive">False</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkSeparator"/>
+                        </child>
+                        <child>
+                            <object class="GtkButton" id="btn_refresh">
+                                <signal name="clicked" handler="handle_refresh_clicked" swapped="true"/>
+                                <child>
+                                    <object class="GtkImage">
+                                        <property name="icon-name">view-refresh</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkSeparator"/>
+                        </child>
+
+                        <child>
+                            <object class="GtkEntry" id="searchbar">
+                                <signal name="activate" handler="handle_searchbar_clicked" swapped="true"/>
+                                <property name="placeholder-text" translatable="yes">about:gosub</property>
+                                <property name="primary-icon-name">channel-secure</property>
+                                <property name="secondary-icon-name">edit-find</property>
+                                <property name="hexpand">True</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkToggleButton">
+                                <signal name="clicked" handler="handle_toggle_darkmode" swapped="true"/>
+                                <child>
+                                    <object class="GtkImage">
+                                        <property name="icon-name">weather-clear-symbolic</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkButton">
+                                <child>
+                                    <object class="GtkImage">
+                                        <property name="icon-name">preferences-desktop-accessibility-symbolic</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkButton">
+                                <child>
+                                    <object class="GtkImage">
+                                        <property name="icon-name">preferences-desktop-keyboard-symbolic</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+                <child>
+    <!-- tab bar -->
+                    <object class="GtkNotebook" id="tab_bar">
+                        <property name="margin-top">12</property>
+                        <property name="scrollable">true</property>
+                        <child type="action-end">
+                            <object class="GtkButton">
+                                <property name="has-frame">false</property>
+                                <property name="margin-top">0</property>
+                                <property name="margin-end">0</property>
+                                <property name="margin-start">0</property>
+                                <property name="margin-bottom">0</property>
+                                <child>
+                                    <object class="GtkImage">
+                                        <property name="icon-name">list-add-symbolic</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+    <!-- log screen -->
+                <child>
+                    <object class="GtkScrolledWindow" id="log_scroller">
+                        <property name="visible">False</property>
+                        <property name="vexpand">False</property>
+                        <property name="hscrollbar-policy">never</property>
+                        <property name="vscrollbar-policy">automatic</property>
+                        <property name="height-request">100</property>
+                        <child>
+                            <object class="GtkTextView" id="log">
+                                <property name="monospace">True</property>
+                                <property name="editable">False</property>
+                                <property name="cursor-visible">False</property>
+                                <property name="hexpand">True</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+                <child>
+    <!-- status bar -->
+                    <object class="GtkStatusbar" id="statusbar">
+                        <property name="visible">True</property>
+                        <property name="can-focus">False</property>
+                        <property name="valign">end</property>
+                        <property name="vexpand">False</property>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </template>
+</interface>

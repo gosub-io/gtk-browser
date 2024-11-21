@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <menu id="app-menu">
+        <submenu>
+            <attribute name="label">File</attribute>
+            <section>
+                <item>
+                    <attribute name="label">New tab</attribute>
+                    <attribute name="action">app.open-new-tab</attribute>
+                </item>
+                <item>
+                    <attribute name="label">Open</attribute>
+                    <attribute name="action">app.open</attribute>
+                </item>
+                <item>
+                    <attribute name="label">Save</attribute>
+                    <attribute name="action">app.save</attribute>
+                </item>
+                <item>
+                    <attribute name="label">Save As</attribute>
+                    <attribute name="action">app.save_as</attribute>
+                </item>
+            </section>
+            <section>
+                <item>
+                    <attribute name="label">Exit</attribute>
+                    <attribute name="action">app.quit</attribute>
+                </item>
+            </section>
+        </submenu>
+
+        <submenu>
+            <attribute name="label">Edit</attribute>
+            <item>
+                <attribute name="label">Cut</attribute>
+                <attribute name="action">app.cut</attribute>
+            </item>
+            <item>
+                <attribute name="label">Copy</attribute>
+                <attribute name="action">app.copy</attribute>
+            </item>
+            <item>
+                <attribute name="label">Paste</attribute>
+                <attribute name="action">app.paste</attribute>
+            </item>
+        </submenu>
+
+        <submenu>
+            <attribute name="label">View</attribute>
+            <item>
+                <attribute name="label">Reload</attribute>
+                <attribute name="action">app.reload</attribute>
+            </item>
+            <item>
+                <attribute name="label">Developer Tools</attribute>
+                <attribute name="action">app.dev_tools</attribute>
+            </item>
+        </submenu>
+
+        <submenu>
+            <attribute name="label">Tools</attribute>
+
+            <section>
+                <item>
+                    <attribute name="label">Downloads</attribute>
+                    <attribute name="action">app.downloads</attribute>
+                </item>
+                <item>
+                    <attribute name="label">Bookmarks</attribute>
+                    <attribute name="action">app.bookmarks</attribute>
+                </item>
+                <item>
+                    <attribute name="label">History</attribute>
+                    <attribute name="action">app.history</attribute>
+                </item>
+            </section>
+
+            <section>
+                <item>
+                    <attribute name="label">Toggle dark mode</attribute>
+                    <attribute name="action">app.toggle-dark-mode</attribute>
+                    <attribute name="checkmark">true</attribute>
+                </item>
+            </section>
+
+            <section>
+                <item>
+                    <attribute name="label">Toggle logging window</attribute>
+                    <attribute name="action">app.toggle-log</attribute>
+                </item>
+            </section>
+
+            <section>
+                <item>
+                    <attribute name="label">Page Info</attribute>
+                    <attribute name="action">app.page_info</attribute>
+                </item>
+                <item>
+                    <attribute name="label">View source</attribute>
+                    <attribute name="action">app.view_source</attribute>
+                </item>
+            </section>
+
+            <section>
+                <item>
+                    <attribute name="label">Settings</attribute>
+                    <attribute name="action">app.settings</attribute>
+                </item>
+            </section>
+
+        </submenu>
+
+        <submenu>
+            <attribute name="label">Help</attribute>
+            <item>
+                <attribute name="label">Getting Help</attribute>
+                <attribute name="action">app.show-help</attribute>
+            </item>
+            <item>
+                <attribute name="label">About Gosub</attribute>
+                <attribute name="action">app.show-about</attribute>
+            </item>
+        </submenu>
+    </menu>
+</interface>
