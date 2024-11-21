@@ -4,6 +4,10 @@ This is a prototype of a GTK browser written in Rust. It is a work in progress a
 
 Do not expect anything to work. The browser is not functional at the moment.
 
+![Screenshot of the browser](./docs/screenshots/initial-screen.png)
+
+[More screenshots](./docs/screenshots/)
+
 ### Installing dependencies:
 
 ```bash
