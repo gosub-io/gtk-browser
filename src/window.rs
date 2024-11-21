@@ -141,6 +141,10 @@ impl BrowserWindow {
                 let mut manager = binding.lock().unwrap();
                 if let Some(tab_id) = manager.page_to_tab(page_num) {
                     manager.set_active(tab_id);
+
+                    // Set the searchbar text to the current tab's URL
+                    let tab = manager.get_tab(tab_id).unwrap();
+                    window_clone.imp().searchbar.set_text(tab.url());
                 }
                 drop(manager);
             }
