@@ -1,24 +1,24 @@
 # Gosub GTK browser prototype
 
-TODO Gui specific stuff:
-- [X] Implement the tab manager
-- [X] Implement open tab CTRL-T
-- [X] Make async work, so we can init a tab with a spinner, async load favicon, and display favicon once loaded
-- [X] Implement url loader in searchbar
-- [X] implement closing tab
-- [ ] implement pinned tabs (should be working but no way to pin them yet)
-- [ ] implement tab dragging and sorting
-- [X] change title of window based on the title of the tab
-- [ ] implement url history (per tab)
-- [X] implement scroller for logging window
-- [X] show/hide logging window with CTRL-L
-- [X] show raw HTML inside browser tab so we can see things are loaded
-- [ ] Address bar should reflect current address
+This is a prototype of a GTK browser written in Rust. It is a work in progress and is not intended to be used as a real browser bur merely as a test to see how well the Gosub engine can be implemented in a real-life applicaiton.
 
-TODO Gosub engine implementation (assumes async eventloop is implemented in gosub engine):
-- [ ] Make sure we can use vello in a window for drawing
-- [ ] enable engine to parse html
-- [ ] make sure render backend can render html
-- [X] scrollable html 
-- [X] html per tab
-- [ ] make use of the gosub eventloop for tasks
+Do not expect anything to work. The browser is not functional at the moment.
+
+### Installing dependencies:
+
+```bash
+sudo apt install libgtk-4-dev
+```
+
+or similar on your linux system. There is no support for anything non-debian/ubuntu at the 
+moment, but it should be easy to add support for other linux systems.
+
+Currently, there is no macOS or Windows support. However, it should be possible to run the browser under WSL2.
+
+Any help with adding support for other systems is welcome.
+
+### Running the browser:
+
+```bash
+cargo run
+```
