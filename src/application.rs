@@ -2,7 +2,7 @@ use crate::dialog::about::About;
 use crate::APP_ID;
 use gtk4::glib::clone;
 use gtk4::subclass::prelude::GtkApplicationImpl;
-use gtk4::{gio, glib, prelude::*, subclass::prelude::*};
+use gtk4::{gio, glib, prelude::*, subclass::prelude::*, Settings};
 use gtk_macros::action;
 use log::info;
 use crate::window::BrowserWindow;
@@ -77,6 +77,7 @@ impl Application {
     }
 
     fn setup_actions(&self) {
+
         action!(self, "quit", clone!(
             #[weak(rename_to=app)]
             self,
@@ -90,12 +91,9 @@ impl Application {
             self,
             move |_, _| {
                 info!("Toggle dark mode action triggered");
-                // let mgr = StyleManager::default();
-                // if mgr.is_dark() {
-                //     mgr.set_color_scheme(ColorScheme::ForceLight);
-                // } else {
-                //     mgr.set_color_scheme(ColorScheme::ForceDark);
-                // }
+                let settings = Settings::default().expect("Failed to get default GtkSettings");
+                let mode: bool = settings.property("gtk-application-prefer-dark-theme");
+                settings.set_property("gtk-application-prefer-dark-theme", !mode);
             })
         );
 

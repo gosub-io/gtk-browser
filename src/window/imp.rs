@@ -8,9 +8,7 @@ use gtk4::glib::subclass::Signal;
 use gtk4::glib::Quark;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{
-    glib, Button, CompositeTemplate, Entry, Image, Notebook, ScrolledWindow, Statusbar, TemplateChild, TextView, ToggleButton, Widget,
-};
+use gtk4::{glib, Button, CompositeTemplate, Entry, Image, Notebook, ScrolledWindow, Settings, Statusbar, TemplateChild, TextView, ToggleButton, Widget};
 use log::info;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
@@ -137,16 +135,12 @@ impl BrowserWindow {
     }
 
     #[template_callback]
-    fn handle_toggle_darkmode(&self, _btn: &ToggleButton) {
+    fn handle_toggle_darkmode(&self, btn: &ToggleButton) {
         self.log("Toggling dark mode");
 
         info!("Toggle dark mode action triggered");
-        // let mgr = StyleManager::default();
-        // if mgr.is_dark() {
-        //     mgr.set_color_scheme(ColorScheme::ForceLight);
-        // } else {
-        //     mgr.set_color_scheme(ColorScheme::ForceDark);
-        // }
+        let settings = Settings::default().expect("Failed to get default GtkSettings");
+        settings.set_property("gtk-application-prefer-dark-theme", &btn.is_active());
     }
 
     #[template_callback]
