@@ -5,6 +5,7 @@ use gtk4::subclass::prelude::GtkApplicationImpl;
 use gtk4::{gio, glib, prelude::*, subclass::prelude::*, Settings};
 use gtk_macros::action;
 use log::info;
+use crate::dialog::shortcuts::ShortcutsDialog;
 use crate::window::BrowserWindow;
 
 mod imp {
@@ -103,9 +104,20 @@ impl Application {
             move |_, _| {
                 info!("Show about dialog action triggered");
                 let about = About::new();
-                about.show();
+                about.present();
             })
         );
+
+        action!(self, "show-shortcuts", clone!(
+            #[weak(rename_to=app)]
+            self,
+            move |_, _| {
+                info!("Show about dialog action triggered");
+                let about = ShortcutsDialog::new(&app);
+                about.present();
+            })
+        );
+
     }
 
     fn setup_accelerators(&self) {
@@ -113,6 +125,7 @@ impl Application {
         self.set_accels_for_action("app.quit", &["<Primary>Q"]);
         self.set_accels_for_action("app.toggle-dark-mode", &["<Primary>D"]);
         self.set_accels_for_action("app.show-about", &["F1"]);
+        self.set_accels_for_action("app.show-shortcuts", &["F2"]);
     }
 
     pub fn run(&self) {

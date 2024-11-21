@@ -1,11 +1,9 @@
 use gtk4::gdk::Texture;
 use gtk4::gdk_pixbuf::Pixbuf;
 
-#[allow(unused)]
 pub struct About;
 
 impl About {
-    #[allow(unused)]
     pub fn new() -> gtk4::AboutDialog {
         let about = gtk4::AboutDialog::new();
         about.set_program_name("Gosub Browser".into());
