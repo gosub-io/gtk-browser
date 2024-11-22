@@ -208,6 +208,22 @@ impl GosubTabManager {
         self.tabs.len()
     }
 
+    /// Returns true when the given tab is the leftmost tab
+    pub(crate) fn is_left_tab(&self, tab_id: TabId) -> bool {
+        if let Some(index) = self.tab_order.iter().position(|id| id == &tab_id) {
+            return index == 0;
+        }
+        false
+    }
+
+    /// Returns true when the given tab is the rightmost tab
+    pub(crate) fn is_right_tab(&self, tab_id: TabId) -> bool {
+        if let Some(index) = self.tab_order.iter().position(|id| id == &tab_id) {
+            return index == self.tab_order.len() - 1;
+        }
+        false
+    }
+
     pub(crate) fn get_active_tab(&self) -> Option<GosubTab> {
         let tab_id = self.active_tab;
         self.get_tab(tab_id)

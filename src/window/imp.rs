@@ -7,7 +7,7 @@ use gtk4::glib::subclass::Signal;
 use gtk4::glib::Quark;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{gdk, glib, Button, CompositeTemplate, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
+use gtk4::{gdk, gio, glib, Button, CompositeTemplate, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
 use log::info;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
@@ -319,14 +319,17 @@ impl BrowserWindow {
             label_vbox.append(&tab_btn);
         }
 
-        // Build the context menu using gio::Menu
-        let menu_model = build_context_menu();
+        let tab_manager = self.tab_manager.lock().unwrap();
+        let is_left = tab_manager.is_left_tab(tab.id());
+        let is_right = tab_manager.is_right_tab(tab.id());
+        let tab_count = tab_manager.tab_count();
+        drop(tab_manager);
 
-        // Create a GestureClick controller
+        let menu_model = build_context_menu(&tab, tab_count, is_left, is_right);
+
         let gesture = GestureClick::builder()
             .button(0) // 0 means all buttons
             .build();
-
 
         let tab_id_clone = tab.id().clone();
         let window_clone = self.obj().clone();
@@ -336,7 +339,6 @@ impl BrowserWindow {
                 let popover = PopoverMenu::from_model(Some(&menu_model));
                 popover.set_flags(PopoverMenuFlags::NESTED);
 
-                // Set up actions for the context menu
                 let action_group = SimpleActionGroup::new();
                 setup_context_menu_actions(
                     &action_group,
@@ -345,7 +347,6 @@ impl BrowserWindow {
                 );
                 popover.insert_action_group("tab", Some(&action_group));
 
-                // Position the popover
                 let widget = gesture.widget();
                 popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
                     x as i32,
@@ -583,7 +584,7 @@ fn setup_context_menu_actions(
     let window_clone = window.clone();
 
     // New Tab to Right
-    let new_tab_right = SimpleAction::new("new_tab_right", None);
+    let new_tab_right = SimpleAction::new("app.tab.new_tab_right", None);
     new_tab_right.connect_activate(move |_, _| {
         // Implement the action
         println!("New Tab to Right clicked");
@@ -592,7 +593,7 @@ fn setup_context_menu_actions(
     action_group.add_action(&new_tab_right);
 
     // Reload Tab
-    let reload_tab = SimpleAction::new("reload_tab", None);
+    let reload_tab = SimpleAction::new("app.tab.reload_tab", None);
     reload_tab.connect_activate(move |_, _| {
         println!("Reload Tab clicked");
         // window.imp().reload_tab(tab_id.clone());
@@ -600,7 +601,7 @@ fn setup_context_menu_actions(
     action_group.add_action(&reload_tab);
 
     // Mute Tab
-    let mute_tab = SimpleAction::new("mute_tab", None);
+    let mute_tab = SimpleAction::new("app.tab.mute_tab", None);
     mute_tab.connect_activate(move |_, _| {
         println!("Mute Tab clicked");
         // window.imp().mute_tab(tab_id.clone());
@@ -608,7 +609,7 @@ fn setup_context_menu_actions(
     action_group.add_action(&mute_tab);
 
     // Pin Tab
-    let pin_tab = SimpleAction::new("pin_tab", None);
+    let pin_tab = SimpleAction::new("app.tab.pin_tab", None);
     pin_tab.connect_activate(move |_, _| {
         println!("Pin Tab clicked");
         // window.imp().pin_tab(tab_id.clone());
@@ -625,6 +626,7 @@ fn setup_context_menu_actions(
 
     // Close Tab
     let close_tab = SimpleAction::new("close_tab", None);
+    close_tab.set_enabled(false);
     close_tab.connect_activate(move |_, _| {
         println!("Close Tab clicked");
         window_clone.imp().close_tab(tab_id.clone());
@@ -664,7 +666,7 @@ fn setup_context_menu_actions(
     action_group.add_action(&close_other_tabs);
 }
 
-fn build_context_menu() -> Menu {
+fn build_context_menu(tab: &GosubTab, tab_count: usize, is_left: bool, is_right: bool) -> Menu {
     let menu = Menu::new();
 
     let section = Menu::new();
@@ -674,19 +676,37 @@ fn build_context_menu() -> Menu {
     let section = Menu::new();
     section.append(Some("Reload Tab"), Some("tab.reload_tab"));
     section.append(Some("Mute Tab"), Some("tab.mute_tab"));
-    section.append(Some("Pin Tab"), Some("tab.pin_tab"));
+    if tab.is_sticky() {
+        section.append(Some("Unpin Tab"), Some("tab.unpin_tab"));
+    } else {
+        section.append(Some("Pin Tab"), Some("tab.pin_tab"));
+    }
     section.append(Some("Duplicate Tab"), Some("tab.duplicate_tab"));
     menu.append_section(None, &section);
 
     let section = Menu::new();
-    section.append(Some("Close Tab"), Some("tab.close_tab"));
+
+    let item = gio::MenuItem::new(Some("Close Tab"), Some("tab.close_tab"));
+    item.set_attribute_value("sensitive", Some(&tab.is_sticky().to_variant()));
+    section.append_item(&item);
 
     let submenu = Menu::new();
-    submenu.append(Some("Close Tabs to Left"), Some("tab.close_tabs_left"));
-    submenu.append(Some("Close Tabs to Right"), Some("tab.close_tabs_right"));
-    submenu.append(Some("Close Other Tabs"), Some("tab.close_other_tabs"));
-    section.append_submenu(Some("Close Multiple Tabs"), &submenu);
+    let item = gio::MenuItem::new(Some("Close Tabs to Left"), Some("tab.close_tabs_left"));
+    item.set_attribute_value("sensitive", Some(&is_left.to_variant()));
+    submenu.append_item(&item);
 
+    let item = gio::MenuItem::new(Some("Close Tabs to Right"), Some("tab.close_tabs_right"));
+    item.set_attribute_value("sensitive", Some(&is_right.to_variant()));
+    submenu.append_item(&item);
+
+    let item = gio::MenuItem::new(Some("Close Other Tabs"), Some("tab.close_other_tabs"));
+    item.set_attribute_value("sensitive", Some(&(tab_count <= 1).to_variant()));
+    submenu.append_item(&item);
+
+    section.append_submenu(Some("Close Other Tabs"), &submenu);
+
+    // @todo: we should only be allowed to reopen closed tab, after we have closed one..
+    // this functionality is not yet implemented
     section.append(Some("Reopen Closed Tab"), Some("tab.reopen_closed_tab"));
     menu.append_section(None, &section);
 
