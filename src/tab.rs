@@ -208,6 +208,40 @@ impl GosubTabManager {
         self.tabs.len()
     }
 
+    /// Returns true when the given tab is the leftmost non-sticky tab
+    pub(crate) fn is_most_left_nonsticky_tab(&self, tab_id: TabId) -> bool {
+        // Find first non-sticky tab
+        let mut found = None;
+        for id in &self.tab_order {
+            if let Some(tab) = self.tabs.get(id) {
+                if !tab.is_sticky() {
+                    found = Some(*id);
+                    break;
+                }
+            }
+        }
+
+        // We match if we found a tab, and the tab-id matches
+        found != None && found == Some(tab_id)
+    }
+
+    /// Returns true when the given tab is the rightmost tab
+    pub(crate) fn is_most_right_tab(&self, tab_id: TabId) -> bool {
+        // Find LAST non-sticky tab
+        let mut found = None;
+        for id in self.tab_order.iter().rev() {
+            if let Some(tab) = self.tabs.get(id) {
+                if !tab.is_sticky() {
+                    found = Some(*id);
+                    break;
+                }
+            }
+        }
+
+        // We match if we found a tab, and the tab-id matches
+        found != None && found == Some(tab_id)
+    }
+
     pub(crate) fn get_active_tab(&self) -> Option<GosubTab> {
         let tab_id = self.active_tab;
         self.get_tab(tab_id)
@@ -215,7 +249,6 @@ impl GosubTabManager {
 
     pub fn set_active(&mut self, tab_id: TabId) {
         if let Some(page_num) = self.tab_order.iter().position(|&id| id == tab_id) {
-            println!("Setting active tab to page {} / {}", page_num, tab_id);
             self.active_tab = tab_id;
 
             self.commands.push(TabCommand::Activate(page_num as u32));
@@ -261,7 +294,6 @@ impl GosubTabManager {
 
     pub fn remove_tab(&mut self, tab_id: TabId) {
         if let Some(index) = self.tab_order.iter().position(|id| id == &tab_id) {
-            println!("removing tab at index {}", index);
             self.tab_order.remove(index);
             self.commands.push(TabCommand::Close(index as u32));
 

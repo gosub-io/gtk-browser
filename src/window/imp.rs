@@ -12,7 +12,8 @@ use log::info;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use std::sync::Mutex;
-use gtk4::gio::{Menu, SimpleAction, SimpleActionGroup};
+use gtk4::gio::SimpleActionGroup;
+use crate::window::tab_context_menu::{build_context_menu, setup_context_menu_actions, TabInfo};
 
 // Create a static Quark as a unique key
 static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
@@ -199,12 +200,7 @@ impl BrowserWindow {
         let commands = manager.commands();
         drop(manager);
 
-        println!("Entering refresh_tabs_async ------------------------------------");
-
-        dbg!(&commands);
-
         for cmd in commands {
-            println!("Processing command: {:?}", cmd);
             match cmd {
                 TabCommand::Activate(page_num) => {
                     self.tab_bar.set_current_page(Some(page_num));
@@ -270,13 +266,6 @@ impl BrowserWindow {
                 }
             }
         }
-
-        let mut manager = self.tab_manager.lock().unwrap();
-        let commands = manager.commands();
-        drop(manager);
-        dbg!(&commands);
-
-        println!("Exiting refresh_tabs_async ------------------------------------");
     }
 
     /// generates a tab label based on the tab info
@@ -319,33 +308,41 @@ impl BrowserWindow {
             label_vbox.append(&tab_btn);
         }
 
-        // Build the context menu using gio::Menu
-        let menu_model = build_context_menu();
-
-        // Create a GestureClick controller
         let gesture = GestureClick::builder()
             .button(0) // 0 means all buttons
             .build();
 
-
-        let tab_id_clone = tab.id().clone();
         let window_clone = self.obj().clone();
+        let tab_id = tab.id().clone();
+        let tab_is_sticky = tab.is_sticky();
 
         gesture.connect_pressed(move |gesture, _n_press, x, y| {
-            if gesture.current_button() == gtk4::gdk::BUTTON_SECONDARY {
+            if gesture.current_button() == gdk::BUTTON_SECONDARY {
+
+                // Refresh the tab info based on the current state
+                let tab_manager = window_clone.imp().tab_manager.lock().unwrap();
+                let tab_count = tab_manager.tab_count();
+                let tab_info = TabInfo {
+                    id: tab_id,
+                    is_sticky: tab_is_sticky,
+                    is_left: tab_manager.is_most_left_nonsticky_tab(tab_id),
+                    is_right: tab_manager.is_most_right_tab(tab_id),
+                    tab_count,
+                };
+                drop(tab_manager);
+
+                let menu_model = build_context_menu(tab_info.clone());
                 let popover = PopoverMenu::from_model(Some(&menu_model));
                 popover.set_flags(PopoverMenuFlags::NESTED);
 
-                // Set up actions for the context menu
                 let action_group = SimpleActionGroup::new();
                 setup_context_menu_actions(
                     &action_group,
                     &window_clone,
-                    tab_id_clone.clone(),
+                    tab_info.clone(),
                 );
                 popover.insert_action_group("tab", Some(&action_group));
 
-                // Position the popover
                 let widget = gesture.widget();
                 popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
                     x as i32,
@@ -575,121 +572,4 @@ fn load_about_url(url: String) -> String {
     }
 }
 
-fn setup_context_menu_actions(
-    action_group: &SimpleActionGroup,
-    window: &super::BrowserWindow,
-    tab_id: TabId,
-) {
-    let window_clone = window.clone();
-
-    // New Tab to Right
-    let new_tab_right = SimpleAction::new("new_tab_right", None);
-    new_tab_right.connect_activate(move |_, _| {
-        // Implement the action
-        println!("New Tab to Right clicked");
-        // Example: window.imp().open_new_tab_to_right(tab_id.clone());
-    });
-    action_group.add_action(&new_tab_right);
-
-    // Reload Tab
-    let reload_tab = SimpleAction::new("reload_tab", None);
-    reload_tab.connect_activate(move |_, _| {
-        println!("Reload Tab clicked");
-        // window.imp().reload_tab(tab_id.clone());
-    });
-    action_group.add_action(&reload_tab);
-
-    // Mute Tab
-    let mute_tab = SimpleAction::new("mute_tab", None);
-    mute_tab.connect_activate(move |_, _| {
-        println!("Mute Tab clicked");
-        // window.imp().mute_tab(tab_id.clone());
-    });
-    action_group.add_action(&mute_tab);
-
-    // Pin Tab
-    let pin_tab = SimpleAction::new("pin_tab", None);
-    pin_tab.connect_activate(move |_, _| {
-        println!("Pin Tab clicked");
-        // window.imp().pin_tab(tab_id.clone());
-    });
-    action_group.add_action(&pin_tab);
-
-    // Duplicate Tab
-    let duplicate_tab = SimpleAction::new("duplicate_tab", None);
-    duplicate_tab.connect_activate(move |_, _| {
-        println!("Duplicate Tab clicked");
-        // window.imp().duplicate_tab(tab_id.clone());
-    });
-    action_group.add_action(&duplicate_tab);
-
-    // Close Tab
-    let close_tab = SimpleAction::new("close_tab", None);
-    close_tab.connect_activate(move |_, _| {
-        println!("Close Tab clicked");
-        window_clone.imp().close_tab(tab_id.clone());
-    });
-    action_group.add_action(&close_tab);
-
-    // Reopen Closed Tab
-    let reopen_closed_tab = SimpleAction::new("reopen_closed_tab", None);
-    reopen_closed_tab.connect_activate(move |_, _| {
-        println!("Reopen Closed Tab clicked");
-        // window.imp().reopen_closed_tab();
-    });
-    action_group.add_action(&reopen_closed_tab);
-
-    // Close Tabs to Left
-    let close_tabs_left = SimpleAction::new("close_tabs_left", None);
-    close_tabs_left.connect_activate(move |_, _| {
-        println!("Close Tabs to Left clicked");
-        // window.imp().close_tabs_to_left(tab_id.clone());
-    });
-    action_group.add_action(&close_tabs_left);
-
-    // Close Tabs to Right
-    let close_tabs_right = SimpleAction::new("close_tabs_right", None);
-    close_tabs_right.connect_activate(move |_, _| {
-        println!("Close Tabs to Right clicked");
-        // window.imp().close_tabs_to_right(tab_id.clone());
-    });
-    action_group.add_action(&close_tabs_right);
-
-    // Close Other Tabs
-    let close_other_tabs = SimpleAction::new("close_other_tabs", None);
-    close_other_tabs.connect_activate(move |_, _| {
-        println!("Close Other Tabs clicked");
-        // window.imp().close_other_tabs(tab_id.clone());
-    });
-    action_group.add_action(&close_other_tabs);
-}
-
-fn build_context_menu() -> Menu {
-    let menu = Menu::new();
-
-    let section = Menu::new();
-    section.append(Some("New Tab to Right"), Some("tab.new_tab_right"));
-    menu.append_section(None, &section);
-
-    let section = Menu::new();
-    section.append(Some("Reload Tab"), Some("tab.reload_tab"));
-    section.append(Some("Mute Tab"), Some("tab.mute_tab"));
-    section.append(Some("Pin Tab"), Some("tab.pin_tab"));
-    section.append(Some("Duplicate Tab"), Some("tab.duplicate_tab"));
-    menu.append_section(None, &section);
-
-    let section = Menu::new();
-    section.append(Some("Close Tab"), Some("tab.close_tab"));
-
-    let submenu = Menu::new();
-    submenu.append(Some("Close Tabs to Left"), Some("tab.close_tabs_left"));
-    submenu.append(Some("Close Tabs to Right"), Some("tab.close_tabs_right"));
-    submenu.append(Some("Close Other Tabs"), Some("tab.close_other_tabs"));
-    section.append_submenu(Some("Close Multiple Tabs"), &submenu);
-
-    section.append(Some("Reopen Closed Tab"), Some("tab.reopen_closed_tab"));
-    menu.append_section(None, &section);
-
-    menu
-}
 
