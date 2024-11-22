@@ -3,6 +3,7 @@ use gtk4::glib;
 
 mod imp;
 mod message;
+mod tab_context_menu;
 
 use crate::application::Application;
 use gtk4::gio;

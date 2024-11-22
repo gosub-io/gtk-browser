@@ -7,11 +7,13 @@ use gtk4::glib::subclass::Signal;
 use gtk4::glib::Quark;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{gdk, glib, Button, CompositeTemplate, Entry, Image, Notebook, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
+use gtk4::{gdk, glib, Button, CompositeTemplate, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
 use log::info;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use std::sync::Mutex;
+use gtk4::gio::SimpleActionGroup;
+use crate::window::tab_context_menu::{build_context_menu, setup_context_menu_actions, TabInfo};
 
 // Create a static Quark as a unique key
 static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
@@ -198,12 +200,7 @@ impl BrowserWindow {
         let commands = manager.commands();
         drop(manager);
 
-        println!("Entering refresh_tabs_async ------------------------------------");
-
-        dbg!(&commands);
-
         for cmd in commands {
-            println!("Processing command: {:?}", cmd);
             match cmd {
                 TabCommand::Activate(page_num) => {
                     self.tab_bar.set_current_page(Some(page_num));
@@ -269,13 +266,6 @@ impl BrowserWindow {
                 }
             }
         }
-
-        let mut manager = self.tab_manager.lock().unwrap();
-        let commands = manager.commands();
-        drop(manager);
-        dbg!(&commands);
-
-        println!("Exiting refresh_tabs_async ------------------------------------");
     }
 
     /// generates a tab label based on the tab info
@@ -317,6 +307,55 @@ impl BrowserWindow {
 
             label_vbox.append(&tab_btn);
         }
+
+        let gesture = GestureClick::builder()
+            .button(0) // 0 means all buttons
+            .build();
+
+        let window_clone = self.obj().clone();
+        let tab_id = tab.id().clone();
+        let tab_is_sticky = tab.is_sticky();
+
+        gesture.connect_pressed(move |gesture, _n_press, x, y| {
+            if gesture.current_button() == gdk::BUTTON_SECONDARY {
+
+                // Refresh the tab info based on the current state
+                let tab_manager = window_clone.imp().tab_manager.lock().unwrap();
+                let tab_count = tab_manager.tab_count();
+                let tab_info = TabInfo {
+                    id: tab_id,
+                    is_sticky: tab_is_sticky,
+                    is_left: tab_manager.is_most_left_nonsticky_tab(tab_id),
+                    is_right: tab_manager.is_most_right_tab(tab_id),
+                    tab_count,
+                };
+                drop(tab_manager);
+
+                let menu_model = build_context_menu(tab_info.clone());
+                let popover = PopoverMenu::from_model(Some(&menu_model));
+                popover.set_flags(PopoverMenuFlags::NESTED);
+
+                let action_group = SimpleActionGroup::new();
+                setup_context_menu_actions(
+                    &action_group,
+                    &window_clone,
+                    tab_info.clone(),
+                );
+                popover.insert_action_group("tab", Some(&action_group));
+
+                let widget = gesture.widget();
+                popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+                    x as i32,
+                    y as i32,
+                    1,
+                    1,
+                )));
+                popover.set_has_arrow(false);
+                popover.set_parent(&widget.unwrap());
+                popover.popup();
+            }
+        });
+        label_vbox.add_controller(gesture);
 
         label_vbox
     }
@@ -532,3 +571,5 @@ fn load_about_url(url: String) -> String {
         .to_string(),
     }
 }
+
+
