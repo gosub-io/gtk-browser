@@ -2,6 +2,9 @@ use crate::tab::TabId;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::gio::{Menu, SimpleAction, SimpleActionGroup};
+use gtk4::glib::clone;
+use crate::runtime;
+use crate::window::message::Message;
 
 /// Simple structure to keep track of tab information. This info is needed in order to enable/disable certain context menu
 /// actions.
@@ -9,11 +12,11 @@ use gtk4::gio::{Menu, SimpleAction, SimpleActionGroup};
 pub(crate) struct TabInfo {
     /// ID of the tab
     pub(crate) id: TabId,
-    /// Tab is sticky or not
-    pub(crate) is_sticky: bool,
-    /// Tab is at the most left side of the non-sticky tabs
+    /// Tab is pinned or not
+    pub(crate) is_pinned: bool,
+    /// Tab is at the most left side of the non-pinned tabs
     pub(crate) is_left: bool,
-    /// Tab is at the most right side of the non-sticky tabs
+    /// Tab is at the most right side of the non-pinned tabs
     pub(crate) is_right: bool,
     /// Number of total tabs
     pub(crate) tab_count: usize,
@@ -24,8 +27,6 @@ pub(crate) fn setup_context_menu_actions(
     window: &super::BrowserWindow,
     info: TabInfo,
 ) {
-    let window_clone = window.clone();
-
     // New Tab to Right
     let new_tab_right = SimpleAction::new("new_tab_right", None);
     new_tab_right.connect_activate(move |_, _| {
@@ -50,13 +51,40 @@ pub(crate) fn setup_context_menu_actions(
 
     // Pin Tab
     let pin_tab = SimpleAction::new("pin_tab", None);
-    if info.is_sticky {
+    if info.is_pinned {
         pin_tab.set_enabled(false);
     }
+
+    let window_clone = window.clone();
     pin_tab.connect_activate(move |_, _| {
-        // window.imp().pin_tab(tab_id.clone());
+        let sender = window_clone.imp().sender.clone();
+        runtime().spawn(clone!(
+            #[strong]
+            sender,
+            async move {
+                sender.send(Message::PinTab(info.id.clone())).await.unwrap();
+            }
+        ));
     });
     action_group.add_action(&pin_tab);
+
+    // Unpin Tab
+    let unpin_tab = SimpleAction::new("unpin_tab", None);
+    if !info.is_pinned {
+        unpin_tab.set_enabled(false);
+    }
+    let window_clone = window.clone();
+    unpin_tab.connect_activate(move |_, _| {
+        let sender = window_clone.imp().sender.clone();
+        runtime().spawn(clone!(
+            #[strong]
+            sender,
+            async move {
+                sender.send(Message::UnpinTab(info.id.clone())).await.unwrap();
+            }
+        ));
+    });
+    action_group.add_action(&unpin_tab);
 
     // Duplicate Tab
     let duplicate_tab = SimpleAction::new("duplicate_tab", None);
@@ -67,6 +95,7 @@ pub(crate) fn setup_context_menu_actions(
 
     // Close Tab
     let close_tab = SimpleAction::new("close_tab", None);
+    let window_clone = window.clone();
     close_tab.connect_activate(move |_, _| {
         window_clone.imp().close_tab(info.id.clone());
     });
@@ -81,7 +110,7 @@ pub(crate) fn setup_context_menu_actions(
 
     // Close Tabs to Left
     let close_tabs_left = SimpleAction::new("close_tabs_left", None);
-    if info.is_left {
+    if info.is_pinned || info.is_left {
         close_tabs_left.set_enabled(false);
     }
     close_tabs_left.connect_activate(move |_, _| {
@@ -91,7 +120,7 @@ pub(crate) fn setup_context_menu_actions(
 
     // Close Tabs to Right
     let close_tabs_right = SimpleAction::new("close_tabs_right", None);
-    if info.is_right {
+    if info.is_pinned || info.is_right {
         close_tabs_right.set_enabled(false);
     }
     close_tabs_right.connect_activate(move |_, _| {
@@ -120,7 +149,7 @@ pub(crate) fn build_context_menu(tab_info: TabInfo) -> Menu {
     let section = Menu::new();
     section.append(Some("Reload Tab"), Some("tab.reload_tab"));
     section.append(Some("Mute Tab"), Some("tab.mute_tab"));
-    if tab_info.is_sticky {
+    if tab_info.is_pinned {
         section.append(Some("Unpin Tab"), Some("tab.unpin_tab"));
     } else {
         section.append(Some("Pin Tab"), Some("tab.pin_tab"));
