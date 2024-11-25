@@ -2,6 +2,9 @@ use crate::tab::TabId;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::gio::{Menu, SimpleAction, SimpleActionGroup};
+use gtk4::glib::clone;
+use crate::runtime;
+use crate::window::message::Message;
 
 /// Simple structure to keep track of tab information. This info is needed in order to enable/disable certain context menu
 /// actions.
@@ -24,8 +27,6 @@ pub(crate) fn setup_context_menu_actions(
     window: &super::BrowserWindow,
     info: TabInfo,
 ) {
-    let window_clone = window.clone();
-
     // New Tab to Right
     let new_tab_right = SimpleAction::new("new_tab_right", None);
     new_tab_right.connect_activate(move |_, _| {
@@ -53,10 +54,37 @@ pub(crate) fn setup_context_menu_actions(
     if info.is_sticky {
         pin_tab.set_enabled(false);
     }
+
+    let window_clone = window.clone();
     pin_tab.connect_activate(move |_, _| {
-        // window.imp().pin_tab(tab_id.clone());
+        let sender = window_clone.imp().sender.clone();
+        runtime().spawn(clone!(
+            #[strong]
+            sender,
+            async move {
+                sender.send(Message::PinTab(info.id.clone())).await.unwrap();
+            }
+        ));
     });
     action_group.add_action(&pin_tab);
+
+    // Unpin Tab
+    let unpin_tab = SimpleAction::new("unpin_tab", None);
+    if !info.is_sticky {
+        unpin_tab.set_enabled(false);
+    }
+    let window_clone = window.clone();
+    unpin_tab.connect_activate(move |_, _| {
+        let sender = window_clone.imp().sender.clone();
+        runtime().spawn(clone!(
+            #[strong]
+            sender,
+            async move {
+                sender.send(Message::UnpinTab(info.id.clone())).await.unwrap();
+            }
+        ));
+    });
+    action_group.add_action(&unpin_tab);
 
     // Duplicate Tab
     let duplicate_tab = SimpleAction::new("duplicate_tab", None);
@@ -67,6 +95,7 @@ pub(crate) fn setup_context_menu_actions(
 
     // Close Tab
     let close_tab = SimpleAction::new("close_tab", None);
+    let window_clone = window.clone();
     close_tab.connect_activate(move |_, _| {
         window_clone.imp().close_tab(info.id.clone());
     });

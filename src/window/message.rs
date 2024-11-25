@@ -15,6 +15,11 @@ pub enum Message {
     // Refresh tabs
     RefreshTabs(),
 
+    // Pins a tab
+    PinTab(TabId),
+    // Unpins a tab
+    UnpinTab(TabId),
+
     // Single message to print in the log
     Log(String),
 }
@@ -28,6 +33,8 @@ impl Debug for Message {
             Message::UrlLoaded(tab_id, content) => write!(f, "UrlLoaded({:?}, {} bytes)", tab_id, content.len()),
             Message::RefreshTabs() => write!(f, "RefreshTabs()"),
             Message::Log(msg) => write!(f, "Log({})", msg),
+            Message::PinTab(tab_id) => write!(f, "PinTab({:?})", tab_id),
+            Message::UnpinTab(tab_id) => write!(f, "UnpinTab({:?})", tab_id),
         }
     }
 }

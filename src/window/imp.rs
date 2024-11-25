@@ -147,23 +147,35 @@ impl BrowserWindow {
 
     #[template_callback]
     async fn handle_searchbar_clicked(&self, entry: &Entry) {
-        let tab_id = self.tab_manager.lock().unwrap().get_active_tab().unwrap().id().clone();
-
-        self.log(format!("Visiting the URL {}", entry.text().as_str()).as_str());
-
-        let binding = entry.text();
-        if binding.starts_with("about:") {
-            // About: pages are special, we don't need to prefix them with a protocol
-            self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
+        let Some(page_num) = self.tab_bar.current_page() else {
+            self.log("No active tab to load the URL");
             return;
-        } else if binding.starts_with("http://") || binding.starts_with("https://") {
-            // https:// and http:// protocols are loaded as-is
-            self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
-        } else {
-            // No protocol, we use https:// as a prefix
-            let url = format!("https://{}", binding);
-            self.sender.send(Message::LoadUrl(tab_id, url)).await.unwrap();
         };
+
+        match self.tab_bar.nth_page(Some(page_num)) {
+            Some(page) => {
+                self.log(format!("Visiting the URL {}", entry.text().as_str()).as_str());
+
+                let tab_id = page.get_tab_id().unwrap();
+
+                let binding = entry.text();
+                if binding.starts_with("about:") {
+                    // About: pages are special, we don't need to prefix them with a protocol
+                    self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
+                    return;
+                } else if binding.starts_with("http://") || binding.starts_with("https://") {
+                    // https:// and http:// protocols are loaded as-is
+                    self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
+                } else {
+                    // No protocol, we use https:// as a prefix
+                    let url = format!("https://{}", binding);
+                    self.sender.send(Message::LoadUrl(tab_id, url)).await.unwrap();
+                };
+            }
+            None => {
+                self.log("No active tab to load the URL");
+            }
+        }
     }
 }
 
@@ -229,12 +241,10 @@ impl BrowserWindow {
                     }
                 }
                 TabCommand::Move(src, dst) => {
+                    println!("Move tab from {} to {}", src, dst);
                     let page = self.tab_bar.nth_page(Some(src)).unwrap();
                     self.tab_bar.reorder_child(&page, Some(dst));
                 }
-                TabCommand::Pin(_) => {}
-                TabCommand::Unpin(_) => {}
-                TabCommand::Private(_) => {}
                 TabCommand::Update(page_num) => {
                     let manager = self.tab_manager.lock().unwrap();
                     let tab = manager.get_tab(manager.page_to_tab(page_num).unwrap()).unwrap().clone();
@@ -268,8 +278,22 @@ impl BrowserWindow {
         }
     }
 
-    /// generates a tab label based on the tab info
-    fn create_tab_label(&self, is_loading: bool, tab: &GosubTab) -> gtk4::Box {
+    fn create_sticky_tab_label(&self, tab: &GosubTab) -> Widget {
+        if let Some(favicon) = &tab.favicon() {
+            let img = Image::from_paintable(Some(&favicon.clone()));
+            img.set_margin_top(5);
+            img.set_margin_bottom(5);
+            return img.into();
+        }
+
+        // No favicon for this pinned tab, so use a default icon
+        let img = Image::from_resource("/io/gosub/browser-gtk/assets/pin.svg");
+        img.set_margin_top(5);
+        img.set_margin_bottom(5);
+        img.into()
+    }
+
+    fn create_normal_tab_label(&self, is_loading: bool, tab: &GosubTab) -> Widget {
         let label_vbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 5);
 
         // When the tab is loading, we show a spinner
@@ -281,32 +305,38 @@ impl BrowserWindow {
             label_vbox.append(&Image::from_paintable(Some(&favicon.clone())));
         }
 
-        // Only show the title and close button if the tab is not sticky
-        if !tab.is_sticky() {
-            let tab_label = gtk4::Label::new(Some(tab.title()));
-            label_vbox.append(&tab_label);
+        let tab_label = gtk4::Label::new(Some(tab.title()));
+        label_vbox.append(&tab_label);
 
-            let tab_btn = Button::builder()
-                .halign(gtk4::Align::End)
-                .has_frame(false)
-                .margin_bottom(0)
-                .margin_end(0)
-                .margin_start(0)
-                .margin_top(0)
-                .build();
-            let img = Image::from_icon_name("window-close-symbolic");
-            tab_btn.set_child(Some(&img));
+        let tab_close_button = Button::builder()
+            .halign(gtk4::Align::End)
+            .has_frame(false)
+            .margin_bottom(0)
+            .margin_end(0)
+            .margin_start(0)
+            .margin_top(0)
+            .build();
+        let img = Image::from_icon_name("window-close-symbolic");
+        tab_close_button.set_child(Some(&img));
+        label_vbox.append(&tab_close_button);
 
-            let window_clone = self.obj().clone();
-            let tab_id = tab.id().clone();
-            tab_btn.connect_clicked(move |_| {
-                info!("Clicked close button for tab {}", tab_id);
-                window_clone.imp().close_tab(tab_id);
-                _ = window_clone.imp().get_sender().send_blocking(Message::RefreshTabs());
-            });
+        let window_clone = self.obj().clone();
+        let tab_id = tab.id().clone();
+        tab_close_button.connect_clicked(move |_| {
+            info!("Clicked close button for tab {}", tab_id);
+            window_clone.imp().close_tab(tab_id);
+            _ = window_clone.imp().get_sender().send_blocking(Message::RefreshTabs());
+        });
 
-            label_vbox.append(&tab_btn);
-        }
+        label_vbox.into()
+    }
+
+    /// generates a tab label based on the tab info
+    fn create_tab_label(&self, is_loading: bool, tab: &GosubTab) -> gtk4::Widget {
+        let tab_label = match tab.is_sticky() {
+            true => self.create_sticky_tab_label(tab),
+            false => self.create_normal_tab_label(is_loading, tab),
+        };
 
         let gesture = GestureClick::builder()
             .button(0) // 0 means all buttons
@@ -318,7 +348,6 @@ impl BrowserWindow {
 
         gesture.connect_pressed(move |gesture, _n_press, x, y| {
             if gesture.current_button() == gdk::BUTTON_SECONDARY {
-
                 // Refresh the tab info based on the current state
                 let tab_manager = window_clone.imp().tab_manager.lock().unwrap();
                 let tab_count = tab_manager.tab_count();
@@ -344,20 +373,20 @@ impl BrowserWindow {
                 popover.insert_action_group("tab", Some(&action_group));
 
                 let widget = gesture.widget();
-                popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
-                    x as i32,
-                    y as i32,
-                    1,
-                    1,
-                )));
+                // popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+                //     x as i32,
+                //     y as i32,
+                //     1,
+                //     1,
+                // )));
                 popover.set_has_arrow(false);
                 popover.set_parent(&widget.unwrap());
                 popover.popup();
             }
         });
-        label_vbox.add_controller(gesture);
+        tab_label.add_controller(gesture);
 
-        label_vbox
+        tab_label
     }
 
     fn generate_default_page(&self) -> gtk4::Box {
@@ -447,13 +476,6 @@ impl BrowserWindow {
                 let tab = GosubTab::new(url.as_str(), url.as_str());
                 let tab_id = tab.id();
 
-                // let tab_label = self.create_tab_label(true, &tab);
-                // let page_num = self.tab_bar.append_page(
-                //     &self.generate_default_page(),
-                //     Some(&tab_label),
-                // );
-                // self.tab_bar.set_current_page(Some(page_num));
-
                 let mut manager = self.tab_manager.lock().unwrap();
                 manager.add_tab(tab, None);
                 manager.notify_tab_changed(tab_id);
@@ -478,11 +500,6 @@ impl BrowserWindow {
 
                 manager.update_tab(tab_id, &tab);
                 drop(manager);
-
-                // // Create loading label and add it to the tab bar
-                // let tab_label = self.create_tab_label(true, &tab);
-                // let page_child = self.tab_bar.nth_page(Some(page_num)).unwrap();
-                // self.tab_bar.set_tab_label(&page_child, Some(&tab_label));
 
                 self.refresh_tabs();
 
@@ -516,15 +533,6 @@ impl BrowserWindow {
                 drop(manager);
 
                 self.refresh_tabs();
-
-                // let tab_label = self.create_tab_label(false, &tab);
-                //
-                // let manager = self.tab_manager.lock().unwrap();
-                // let page_num = manager.get_page_num_by_tab(tab_id).unwrap();
-                // drop(manager);
-                //
-                // let page_child = self.tab_bar.nth_page(Some(page_num)).unwrap();
-                // self.tab_bar.set_tab_label(&page_child, Some(&tab_label));
             }
             Message::UrlLoaded(tab_id, html_content) => {
                 let mut manager = self.tab_manager.lock().unwrap();
@@ -538,6 +546,34 @@ impl BrowserWindow {
             }
             Message::Log(msg) => {
                 self.log(msg.as_str());
+            }
+            Message::PinTab(tab_id) => {
+                let mut manager = self.tab_manager.lock().unwrap();
+                let mut tab = manager.get_tab(tab_id).unwrap().clone();
+                tab.set_sticky(true);
+                manager.update_tab(tab_id, &tab);
+
+                // // We need to move the tab to the leftmost position (but after any pinned tabs)
+                // let index = manager.get_first_nonpinned_tab_index();
+                // manager.reorder(tab_id, index);
+                // drop(manager);
+
+                // Update tab-bar
+                self.refresh_tabs();
+            }
+            Message::UnpinTab(tab_id) => {
+                let mut manager = self.tab_manager.lock().unwrap();
+                let mut tab = manager.get_tab(tab_id).unwrap().clone();
+                tab.set_sticky(false);
+                manager.update_tab(tab_id, &tab);
+
+                // We need to move the tab to the leftmost position (after any pinned tabs)
+                let index = manager.get_first_nonpinned_tab_index();
+                manager.reorder(tab_id, index);
+
+                drop(manager);
+
+                self.refresh_tabs();
             }
         }
     }

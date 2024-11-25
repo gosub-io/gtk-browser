@@ -61,6 +61,18 @@ impl BrowserWindow {
         // Refresh tabs on startup
         let window_clone = window.clone();
         spawn_future_local(async move {
+
+            let initial_urls = [
+                "https://gosub.io",
+                "https://microsoft.com",
+                "https://github.com",
+                "https://reddit.com",
+            ];
+
+            for url in initial_urls.iter() {
+                window_clone.imp().get_sender().send(Message::OpenTab(url.to_string())).await.unwrap();
+            }
+
             // Refresh tabs on startup
             window_clone.imp().get_sender().send(Message::RefreshTabs()).await.unwrap();
         });
