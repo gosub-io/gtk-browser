@@ -143,23 +143,23 @@ impl BrowserWindow {
         });
 
         tab_bar.connect_switch_page({
-            let window_clone = window.clone();
-            move |_notebook, _, page_num| {
-                window_clone
-                    .imp()
-                    .log(format!("[result] switched to tab: {}", page_num).as_str());
-
-                let tab_manager = window_clone.imp().tab_manager.clone();
-                let binding = tab_manager.clone();
-                let mut manager = binding.lock().unwrap();
-                if let Some(tab_id) = manager.page_to_tab(page_num) {
-                    manager.set_active(tab_id);
-
-                    // Set the searchbar text to the current tab's URL
-                    let tab = manager.get_tab(tab_id).unwrap();
-                    window_clone.imp().searchbar.set_text(tab.url());
-                }
-                drop(manager);
+            // let window_clone = window.clone();
+            move |_notebook, _, _page_num| {
+                // window_clone
+                //     .imp()
+                //     .log(format!("[result] switched to tab: {}", page_num).as_str());
+                //
+                // let tab_manager = window_clone.imp().tab_manager.clone();
+                // let binding = tab_manager.clone();
+                // let mut manager = binding.lock().unwrap();
+                // if let Some(tab_id) = manager.page_to_tab(page_num) {
+                //     manager.set_active(tab_id);
+                //
+                //     // Set the searchbar text to the current tab's URL
+                //     let tab = manager.get_tab(tab_id).unwrap();
+                //     window_clone.imp().searchbar.set_text(tab.url());
+                // }
+                // drop(manager);
             }
         });
     }

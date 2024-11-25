@@ -12,11 +12,11 @@ use crate::window::message::Message;
 pub(crate) struct TabInfo {
     /// ID of the tab
     pub(crate) id: TabId,
-    /// Tab is sticky or not
-    pub(crate) is_sticky: bool,
-    /// Tab is at the most left side of the non-sticky tabs
+    /// Tab is pinned or not
+    pub(crate) is_pinned: bool,
+    /// Tab is at the most left side of the non-pinned tabs
     pub(crate) is_left: bool,
-    /// Tab is at the most right side of the non-sticky tabs
+    /// Tab is at the most right side of the non-pinned tabs
     pub(crate) is_right: bool,
     /// Number of total tabs
     pub(crate) tab_count: usize,
@@ -51,7 +51,7 @@ pub(crate) fn setup_context_menu_actions(
 
     // Pin Tab
     let pin_tab = SimpleAction::new("pin_tab", None);
-    if info.is_sticky {
+    if info.is_pinned {
         pin_tab.set_enabled(false);
     }
 
@@ -70,7 +70,7 @@ pub(crate) fn setup_context_menu_actions(
 
     // Unpin Tab
     let unpin_tab = SimpleAction::new("unpin_tab", None);
-    if !info.is_sticky {
+    if !info.is_pinned {
         unpin_tab.set_enabled(false);
     }
     let window_clone = window.clone();
@@ -149,7 +149,7 @@ pub(crate) fn build_context_menu(tab_info: TabInfo) -> Menu {
     let section = Menu::new();
     section.append(Some("Reload Tab"), Some("tab.reload_tab"));
     section.append(Some("Mute Tab"), Some("tab.mute_tab"));
-    if tab_info.is_sticky {
+    if tab_info.is_pinned {
         section.append(Some("Unpin Tab"), Some("tab.unpin_tab"));
     } else {
         section.append(Some("Pin Tab"), Some("tab.pin_tab"));
