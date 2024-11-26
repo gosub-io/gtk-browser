@@ -1,20 +1,23 @@
 use crate::tab::{GosubTab, GosubTabManager, TabCommand, TabId};
 use crate::window::message::Message;
+use crate::window::tab_context_menu::{build_context_menu, setup_context_menu_actions, TabInfo};
 use crate::{fetcher, runtime};
 use async_channel::{Receiver, Sender};
 use glib::subclass::InitializingObject;
+use gtk4::gio::SimpleActionGroup;
 use gtk4::glib::subclass::Signal;
 use gtk4::glib::Quark;
+use gtk4::graphene::Point;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{gdk, glib, Button, CompositeTemplate, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
+use gtk4::{
+    gdk, glib, Button, CompositeTemplate, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings,
+    TemplateChild, TextView, ToggleButton, Widget,
+};
 use log::info;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use std::sync::Mutex;
-use gtk4::gio::SimpleActionGroup;
-use gtk4::graphene::Point;
-use crate::window::tab_context_menu::{build_context_menu, setup_context_menu_actions, TabInfo};
 
 // Create a static Quark as a unique key
 static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
@@ -138,7 +141,7 @@ impl BrowserWindow {
 
         info!("Toggle dark mode action triggered");
         let settings = Settings::default().expect("Failed to get default GtkSettings");
-        settings.set_property("gtk-application-prefer-dark-theme", &btn.is_active());
+        settings.set_property("gtk-application-prefer-dark-theme", btn.is_active());
     }
 
     #[template_callback]
@@ -163,7 +166,6 @@ impl BrowserWindow {
                 if binding.starts_with("about:") {
                     // About: pages are special, we don't need to prefix them with a protocol
                     self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
-                    return;
                 } else if binding.starts_with("http://") || binding.starts_with("https://") {
                     // https:// and http:// protocols are loaded as-is
                     self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
@@ -171,7 +173,7 @@ impl BrowserWindow {
                     // No protocol, we use https:// as a prefix
                     let url = format!("https://{}", binding);
                     self.sender.send(Message::LoadUrl(tab_id, url)).await.unwrap();
-                };
+                }
             }
             None => {
                 self.log("No active tab to load the URL");
@@ -267,7 +269,7 @@ impl BrowserWindow {
                         .build();
 
                     let content = TextView::builder().editable(false).wrap_mode(gtk4::WrapMode::Word).build();
-                    content.buffer().set_text(&tab.content());
+                    content.buffer().set_text(tab.content());
                     scrolled_window.set_child(Some(&content));
                     scrolled_window.set_tab_id(tab.id());
 
@@ -332,7 +334,7 @@ impl BrowserWindow {
         label_vbox.append(&tab_close_button);
 
         let window_clone = self.obj().clone();
-        let tab_id = tab.id().clone();
+        let tab_id = tab.id();
         tab_close_button.connect_clicked(move |_| {
             info!("Clicked close button for tab {}", tab_id);
             window_clone.imp().close_tab(tab_id);
@@ -354,7 +356,7 @@ impl BrowserWindow {
             .build();
 
         let window_clone = self.obj().clone();
-        let tab_id = tab.id().clone();
+        let tab_id = tab.id();
         let tab_is_pinned = tab.is_pinned();
 
         gesture.connect_pressed(move |gesture, _n_press, x, y| {
@@ -380,11 +382,7 @@ impl BrowserWindow {
                     .build();
 
                 let action_group = SimpleActionGroup::new();
-                setup_context_menu_actions(
-                    &action_group,
-                    &window_clone,
-                    tab_info.clone(),
-                );
+                setup_context_menu_actions(&action_group, &window_clone, tab_info.clone());
                 popover.insert_action_group("tab", Some(&action_group));
 
                 if let Some(widget) = gesture.widget() {
@@ -392,12 +390,7 @@ impl BrowserWindow {
                     // are relative from the widget, we need to convert them X/Y positions based on the window.
                     popover.set_parent(&window_clone);
                     if let Some(p) = widget.compute_point(&window_clone, &Point::new(x as f32, y as f32)) {
-                        popover.set_pointing_to(Some(&gdk::Rectangle::new(
-                            p.x() as i32,
-                            p.y() as i32,
-                            0,
-                            0,
-                        )));
+                        popover.set_pointing_to(Some(&gdk::Rectangle::new(p.x() as i32, p.y() as i32, 0, 0)));
                         popover.popup();
                     }
                 }
@@ -629,5 +622,3 @@ fn load_about_url(url: String) -> String {
         .to_string(),
     }
 }
-
-

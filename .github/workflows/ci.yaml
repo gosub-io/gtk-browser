@@ -15,9 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust_version: [ stable, nightly, 1.73.0 ]
+        rust_version: [ stable, nightly, 1.79.0 ]
         os: [ ubuntu-24.04 ]
-#        rust_version: [ stable, beta, nightly, 1.73.0, "stable minus 1 release", "stable minus 2 releases" ]
+#        rust_version: [ stable, beta, nightly, 1.79.0, "stable minus 1 release", "stable minus 2 releases" ]
 #        os: [ ubuntu-24.04, windows-latest, macos-latest ]
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
         with:
           toolchain: ${{ matrix.rust_version }}
       - name: Install dependencies
-        run: sudo apt update -y && sudo apt install libgtk4-dev -y
+        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev -y
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -53,16 +53,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust_version: [ stable, nightly, 1.73.0 ]
+        rust_version: [ stable, nightly, 1.79.0 ]
         os: [ ubuntu-24.04 ]
-#        rust_version: [ stable, beta, nightly, 1.73.0, "stable minus 1 release", "stable minus 2 releases" ]
+#        rust_version: [ stable, beta, nightly, 1.79.0, "stable minus 1 release", "stable minus 2 releases" ]
 #        os: [ ubuntu-24.04, windows-latest, macos-latest ]
     steps:
       - name: Print CPU info
         run: lscpu
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt update -y && sudo apt install libgtk4-dev -y
+        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev -y
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust_version }}
@@ -90,10 +90,12 @@ jobs:
       matrix:
         rust_version: [ stable, nightly ]
         os: [ ubuntu-24.04 ]
-#        rust_version: [ stable, beta, nightly, 1.73.0, "stable minus 1 release", "stable minus 2 releases" ]
+#        rust_version: [ stable, beta, nightly, 1.79.0, "stable minus 1 release", "stable minus 2 releases" ]
 #        os: [ ubuntu-24.04, windows-latest, macos-latest ]
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev -y
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust_version }}
