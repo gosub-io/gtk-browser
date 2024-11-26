@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 gtk-macros = "0.3"
-gtk4 = { version = "0.9.3", features = ["v4_6", "v4_14"] }
+gtk4 = { version = "0.9.4", features = ["v4_6", "v4_14"] }
 chrono = { version = "0.4.31", features = [] }
 reqwest = {  version = "0.12.9", features = ["blocking"] }
 image = "0.25.4"
