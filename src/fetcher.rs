@@ -1,6 +1,6 @@
-use std::time::Duration;
 use log::info;
 use reqwest::{Client, Error, Response};
+use std::time::Duration;
 
 const GOSUB_USERAGENT_STRING: &str = "Mozilla/5.0 (X11; Linux x86_64; Wayland; rv:1.0) Gecko/20231106 Gosub/0.1 Firefox/89.0";
 

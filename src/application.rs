@@ -1,17 +1,18 @@
 use crate::dialog::about::About;
+use crate::dialog::shortcuts::ShortcutsDialog;
+use crate::window::BrowserWindow;
 use crate::APP_ID;
 use gtk4::glib::clone;
 use gtk4::subclass::prelude::GtkApplicationImpl;
 use gtk4::{gio, glib, prelude::*, subclass::prelude::*, Settings};
 use gtk_macros::action;
 use log::info;
-use crate::dialog::shortcuts::ShortcutsDialog;
-use crate::window::BrowserWindow;
 
 mod imp {
     use super::*;
     use crate::window::BrowserWindow;
 
+    #[derive(Default)]
     pub struct Application {}
 
     #[glib::object_subclass]
@@ -19,12 +20,6 @@ mod imp {
         const NAME: &'static str = "Application";
         type Type = super::Application;
         type ParentType = gtk4::Application;
-    }
-
-    impl Default for Application {
-        fn default() -> Self {
-            Self {}
-        }
     }
 
     impl ObjectImpl for Application {}
@@ -68,7 +63,7 @@ impl Application {
     pub fn new() -> Self {
         glib::Object::builder()
             .property("application-id", APP_ID)
-            .property("resource-base-path", &Some("/io/gosub/browser-gtk"))
+            .property("resource-base-path", Some("/io/gosub/browser-gtk"))
             .build()
     }
 
@@ -78,46 +73,60 @@ impl Application {
     }
 
     fn setup_actions(&self) {
-
-        action!(self, "quit", clone!(
-            #[weak(rename_to=app)]
+        action!(
             self,
-            move |_, _| {
-                app.quit();
-            })
+            "quit",
+            clone!(
+                #[weak(rename_to=app)]
+                self,
+                move |_, _| {
+                    app.quit();
+                }
+            )
         );
 
-        action!(self, "toggle-dark-mode", clone!(
-            #[weak(rename_to=_app)]
+        action!(
             self,
-            move |_, _| {
-                info!("Toggle dark mode action triggered");
-                let settings = Settings::default().expect("Failed to get default GtkSettings");
-                let mode: bool = settings.property("gtk-application-prefer-dark-theme");
-                settings.set_property("gtk-application-prefer-dark-theme", !mode);
-            })
+            "toggle-dark-mode",
+            clone!(
+                #[weak(rename_to=_app)]
+                self,
+                move |_, _| {
+                    info!("Toggle dark mode action triggered");
+                    let settings = Settings::default().expect("Failed to get default GtkSettings");
+                    let mode: bool = settings.property("gtk-application-prefer-dark-theme");
+                    settings.set_property("gtk-application-prefer-dark-theme", !mode);
+                }
+            )
         );
 
-        action!(self, "show-about", clone!(
-            #[weak(rename_to=_app)]
+        action!(
             self,
-            move |_, _| {
-                info!("Show about dialog action triggered");
-                let about = About::new();
-                about.present();
-            })
+            "show-about",
+            clone!(
+                #[weak(rename_to=_app)]
+                self,
+                move |_, _| {
+                    info!("Show about dialog action triggered");
+                    let about = About::create_dialog();
+                    about.present();
+                }
+            )
         );
 
-        action!(self, "show-shortcuts", clone!(
-            #[weak(rename_to=app)]
+        action!(
             self,
-            move |_, _| {
-                info!("Show about dialog action triggered");
-                let about = ShortcutsDialog::new(&app);
-                about.present();
-            })
+            "show-shortcuts",
+            clone!(
+                #[weak(rename_to=app)]
+                self,
+                move |_, _| {
+                    info!("Show about dialog action triggered");
+                    let about = ShortcutsDialog::create_dialog(&app);
+                    about.present();
+                }
+            )
         );
-
     }
 
     fn setup_accelerators(&self) {
@@ -136,9 +145,6 @@ impl Application {
 
 impl Default for Application {
     fn default() -> Self {
-        gio::Application::default()
-            .unwrap()
-            .downcast::<Application>()
-            .unwrap()
+        gio::Application::default().unwrap().downcast::<Application>().unwrap()
     }
 }

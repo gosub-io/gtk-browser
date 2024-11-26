@@ -1,18 +1,18 @@
-use gtk4::glib::{clone, spawn_future_local};
 use gtk4::glib;
+use gtk4::glib::{clone, spawn_future_local};
 
 mod imp;
 mod message;
 mod tab_context_menu;
 
 use crate::application::Application;
+use crate::runtime;
+use crate::window::imp::WidgetExtTabId;
+use crate::window::message::Message;
 use gtk4::gio;
 use gtk4::gio::SimpleAction;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::ObjectSubclassIsExt;
-use crate::runtime;
-use crate::window::imp::WidgetExtTabId;
-use crate::window::message::Message;
 
 // This wrapper must be in a different module than the implementation, because both will define a
 // `struct BrowserWindow` and they would clash. In this case, the browser window is a subclass of
@@ -32,9 +32,7 @@ impl BrowserWindow {
         window.set_default_size(1024, 768);
 
         let builder = gtk4::Builder::from_resource("/io/gosub/browser-gtk/ui/main_menu.ui");
-        let menubar = builder
-            .object::<gio::MenuModel>("app-menu")
-            .expect("Could not find app-menu");
+        let menubar = builder.object::<gio::MenuModel>("app-menu").expect("Could not find app-menu");
 
         app.set_menubar(Some(&menubar));
         window.set_show_menubar(true);
@@ -61,7 +59,6 @@ impl BrowserWindow {
         // Refresh tabs on startup
         let window_clone = window.clone();
         spawn_future_local(async move {
-
             let initial_urls = [
                 "https://gosub.io",
                 "https://microsoft.com",
@@ -70,7 +67,12 @@ impl BrowserWindow {
             ];
 
             for url in initial_urls.iter() {
-                window_clone.imp().get_sender().send(Message::OpenTab(url.to_string())).await.unwrap();
+                window_clone
+                    .imp()
+                    .get_sender()
+                    .send(Message::OpenTab(url.to_string()))
+                    .await
+                    .unwrap();
             }
 
             // Refresh tabs on startup
@@ -102,7 +104,7 @@ impl BrowserWindow {
         // Create new tab
         let window_clone = window.clone();
         let new_tab_action = SimpleAction::new("open-new-tab", None);
-        new_tab_action.connect_activate(move | _, _ |{
+        new_tab_action.connect_activate(move |_, _| {
             let sender = window_clone.imp().sender.clone();
             runtime().spawn(clone!(
                 #[strong]
@@ -127,9 +129,7 @@ impl BrowserWindow {
         tab_bar.connect_page_removed({
             let window_clone = window.clone();
             move |_notebook, _widget, page_num| {
-                window_clone
-                    .imp()
-                    .log(format!("[result] removed tab: {}", page_num).as_str());
+                window_clone.imp().log(format!("[result] removed tab: {}", page_num).as_str());
             }
         });
 
@@ -145,9 +145,7 @@ impl BrowserWindow {
         tab_bar.connect_switch_page({
             let window_clone = window.clone();
             move |_notebook, page, page_num| {
-                window_clone
-                    .imp()
-                    .log(format!("[result] switched to tab: {}", page_num).as_str());
+                window_clone.imp().log(format!("[result] switched to tab: {}", page_num).as_str());
 
                 if let Some(tab_id) = page.get_tab_id() {
                     let manager = window_clone.imp().tab_manager.lock().unwrap();

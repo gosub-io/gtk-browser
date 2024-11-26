@@ -1,23 +1,21 @@
-mod window;
-mod tab;
+mod application;
 mod dialog;
 mod fetcher;
-mod application;
+mod tab;
+mod window;
 
-use std::sync::OnceLock;
+use crate::application::Application;
 use gtk4::gdk::Display;
 use gtk4::prelude::ApplicationExt;
 use gtk4::{gio, CssProvider};
+use std::sync::OnceLock;
 use tokio::runtime::Runtime;
-use crate::application::Application;
 
 const APP_ID: &str = "io.gosub.browser-gtk";
 
 fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-    RUNTIME.get_or_init(|| {
-        Runtime::new().expect("Setting up tokio runtime needs to succeed.")
-    })
+    RUNTIME.get_or_init(|| Runtime::new().expect("Setting up tokio runtime needs to succeed."))
 }
 
 fn main() {
@@ -37,6 +35,6 @@ fn load_css() {
     gtk4::style_context_add_provider_for_display(
         &Display::default().expect("Could not connect to a display"),
         &provider,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
 }

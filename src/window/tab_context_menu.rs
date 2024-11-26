@@ -1,10 +1,10 @@
+use crate::runtime;
 use crate::tab::TabId;
-use gtk4::prelude::*;
-use gtk4::subclass::prelude::*;
+use crate::window::message::Message;
 use gtk4::gio::{Menu, SimpleAction, SimpleActionGroup};
 use gtk4::glib::clone;
-use crate::runtime;
-use crate::window::message::Message;
+use gtk4::prelude::*;
+use gtk4::subclass::prelude::*;
 
 /// Simple structure to keep track of tab information. This info is needed in order to enable/disable certain context menu
 /// actions.
@@ -22,11 +22,7 @@ pub(crate) struct TabInfo {
     pub(crate) tab_count: usize,
 }
 
-pub(crate) fn setup_context_menu_actions(
-    action_group: &SimpleActionGroup,
-    window: &super::BrowserWindow,
-    info: TabInfo,
-) {
+pub(crate) fn setup_context_menu_actions(action_group: &SimpleActionGroup, window: &super::BrowserWindow, info: TabInfo) {
     // New Tab to Right
     let new_tab_right = SimpleAction::new("new_tab_right", None);
     new_tab_right.connect_activate(move |_, _| {
@@ -62,7 +58,7 @@ pub(crate) fn setup_context_menu_actions(
             #[strong]
             sender,
             async move {
-                sender.send(Message::PinTab(info.id.clone())).await.unwrap();
+                sender.send(Message::PinTab(info.id)).await.unwrap();
             }
         ));
     });
@@ -80,7 +76,7 @@ pub(crate) fn setup_context_menu_actions(
             #[strong]
             sender,
             async move {
-                sender.send(Message::UnpinTab(info.id.clone())).await.unwrap();
+                sender.send(Message::UnpinTab(info.id)).await.unwrap();
             }
         ));
     });
@@ -97,7 +93,7 @@ pub(crate) fn setup_context_menu_actions(
     let close_tab = SimpleAction::new("close_tab", None);
     let window_clone = window.clone();
     close_tab.connect_activate(move |_, _| {
-        window_clone.imp().close_tab(info.id.clone());
+        window_clone.imp().close_tab(info.id);
     });
     action_group.add_action(&close_tab);
 

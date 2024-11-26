@@ -1,15 +1,12 @@
-use gtk4::{ShortcutsGroup, ShortcutsSection, ShortcutsShortcut, ShortcutsWindow};
-use gtk4::prelude::{BoxExt, GtkWindowExt};
 use crate::application::Application;
+use gtk4::prelude::{BoxExt, GtkWindowExt};
+use gtk4::{ShortcutsGroup, ShortcutsSection, ShortcutsShortcut, ShortcutsWindow};
 
 pub struct ShortcutsDialog;
 
 impl ShortcutsDialog {
-    pub fn new(app: &Application) -> ShortcutsWindow {
-        let shortcuts_window = ShortcutsWindow::builder()
-            .application(app)
-            .title("Keyboard Shortcuts")
-            .build();
+    pub fn create_dialog(app: &Application) -> ShortcutsWindow {
+        let shortcuts_window = ShortcutsWindow::builder().application(app).title("Keyboard Shortcuts").build();
 
         shortcuts_window.set_modal(true);
 
@@ -36,15 +33,9 @@ impl ShortcutsDialog {
     fn general_file_group() -> ShortcutsGroup {
         let group = ShortcutsGroup::builder().title("File operations").build();
 
-        let new_tab = ShortcutsShortcut::builder()
-            .title("New Tab")
-            .accelerator("<Ctrl>T")
-            .build();
+        let new_tab = ShortcutsShortcut::builder().title("New Tab").accelerator("<Ctrl>T").build();
 
-        let open_shortcut = ShortcutsShortcut::builder()
-            .title("Open File")
-            .accelerator("<Ctrl>O")
-            .build();
+        let open_shortcut = ShortcutsShortcut::builder().title("Open File").accelerator("<Ctrl>O").build();
 
         let toggle_darkmode = ShortcutsShortcut::builder()
             .title("Toggle dark mode")
@@ -70,7 +61,6 @@ impl ShortcutsDialog {
         group
     }
 
-
     fn fkeys_section() -> ShortcutsSection {
         let section = ShortcutsSection::builder().title("Function Keys").max_height(4).build();
 
@@ -80,7 +70,7 @@ impl ShortcutsDialog {
         for (i, key) in fkeys.iter().enumerate() {
             let shortcut = ShortcutsShortcut::builder()
                 .title(key.to_string())
-                .accelerator(&format!("F{}", i + 1))
+                .accelerator(format!("F{}", i + 1))
                 .build();
             group.append(&shortcut);
         }

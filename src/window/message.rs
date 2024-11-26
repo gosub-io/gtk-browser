@@ -1,6 +1,6 @@
+use crate::tab::TabId;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-use crate::tab::TabId;
 
 pub enum Message {
     // Open a new tab, and load a URL
