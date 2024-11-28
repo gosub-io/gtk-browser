@@ -61,7 +61,7 @@ impl BrowserWindow {
         spawn_future_local(async move {
             let initial_urls = [
                 "https://gosub.io",
-                "https://microsoft.com",
+                "https://www.microsoft.com/en-us/",
                 "https://github.com",
                 "https://reddit.com",
             ];
@@ -70,7 +70,7 @@ impl BrowserWindow {
                 window_clone
                     .imp()
                     .get_sender()
-                    .send(Message::OpenTab(url.to_string()))
+                    .send(Message::OpenTab(url.to_string(), "New Tab".to_string()))
                     .await
                     .unwrap();
             }
@@ -110,7 +110,7 @@ impl BrowserWindow {
                 #[strong]
                 sender,
                 async move {
-                    sender.send(Message::OpenTab("about:blank".into())).await.unwrap();
+                    sender.send(Message::OpenTab("about:blank".into(), "New Tab".into())).await.unwrap();
                 }
             ));
         });
