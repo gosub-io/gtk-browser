@@ -4,7 +4,9 @@ use std::fmt::{Debug, Formatter};
 
 pub enum Message {
     // Open a new tab, and load a URL
-    OpenTab(String),
+    OpenTab(String, String),
+    // Opens a new tab on the right side of the given TabID
+    OpenTabRight(TabId, String, String),
     /// Sent when we need to load a new url into a tab
     LoadUrl(TabId, String),
 
@@ -27,7 +29,8 @@ pub enum Message {
 impl Debug for Message {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Message::OpenTab(url) => write!(f, "OpenTab({})", url),
+            Message::OpenTab(url, title) => write!(f, "OpenTab({} {})", url, title),
+            Message::OpenTabRight(tab_id, url, title) => write!(f, "OpenTabRight({:?}, {} {})", tab_id, url, title),
             Message::LoadUrl(tab_id, url) => write!(f, "LoadUrl({:?}, {})", tab_id, url),
             Message::FaviconLoaded(tab_id, favicon) => write!(f, "FaviconLoaded({:?}, {} bytes)", tab_id, favicon.len()),
             Message::UrlLoaded(tab_id, content) => write!(f, "UrlLoaded({:?}, {} bytes)", tab_id, content.len()),

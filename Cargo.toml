@@ -7,7 +7,7 @@ edition = "2021"
 gtk-macros = "0.3"
 gtk4 = { version = "0.9.4", features = ["v4_6", "v4_14"] }
 chrono = { version = "0.4.31", features = [] }
-reqwest = {  version = "0.12.9", features = ["blocking"] }
+reqwest = {  version = "0.12.9", features = ["blocking", "gzip", "brotli", "cookies", "deflate", "http2", "rustls-tls"] }
 image = "0.25.5"
 uuid = { version = "1.11.0", features = ["v4"] }
 log = "0.4.22"

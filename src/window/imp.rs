@@ -318,7 +318,9 @@ impl BrowserWindow {
             label_vbox.append(&Image::from_paintable(Some(&favicon.clone())));
         }
 
-        let tab_label = gtk4::Label::new(Some(tab.title()));
+        let mut title = tab.title().to_string();
+        title.truncate(20);
+        let tab_label = gtk4::Label::new(Some(title.as_str()));
         label_vbox.append(&tab_label);
 
         let tab_close_button = Button::builder()
@@ -484,22 +486,19 @@ impl BrowserWindow {
             Message::RefreshTabs() => {
                 self.refresh_tabs();
             }
-            Message::OpenTab(url) => {
-                let mut tab = GosubTab::new(url.as_str(), url.as_str());
-                let tab_id = tab.id();
-
-                // add tab to manager, and notify the tab has changed. This will update the tab-bar
-                // during a refresh-tabs call.
-                let mut manager = self.tab_manager.lock().unwrap();
-                tab.set_loading(true);
-                manager.add_tab(tab, None);
-                manager.notify_tab_changed(tab_id);
-                drop(manager);
-                self.refresh_tabs();
-
-                self.load_favicon_async(tab_id);
-                self.load_url_async(tab_id);
+            Message::OpenTab(url, title) => {
+                self.open_tab(None, url, title);
             }
+            Message::OpenTabRight(target_tab_id, url, title) => {
+                for page_num in 0..self.tab_bar.pages().n_items() {
+                    let page = self.tab_bar.nth_page(Some(page_num)).unwrap();
+                    if page.get_tab_id().unwrap() == target_tab_id {
+                        self.open_tab(Some(page_num as usize + 1), url, title);
+                        return;
+                    }
+                }
+            }
+
             Message::LoadUrl(tab_id, url) => {
                 self.log(format!("Loading URL: {}", url).as_str());
 
@@ -553,6 +552,15 @@ impl BrowserWindow {
                 let mut manager = self.tab_manager.lock().unwrap();
                 let mut tab = manager.get_tab(tab_id).unwrap().clone();
                 tab.set_content(html_content.clone());
+
+                // Fetch title from HTML content... poorly..
+                if let Some(title) = fetch_title_from_html(html_content.as_str()) {
+                    tab.set_title(title.as_str());
+                } else {
+                    let url = tab.url().to_string();
+                    tab.set_title(url.as_str());
+                }
+
                 tab.set_loading(false);
                 manager.update_tab(tab_id, &tab);
                 drop(manager);
@@ -592,6 +600,26 @@ impl BrowserWindow {
 
         None
     }
+
+    /// Opens a new tab at the given position, with the given URL and title. If the position is None,
+    /// the tab will be added at the end of the tab-bar.
+    fn open_tab(&self, position: Option<usize>, url: String, title: String) {
+        let mut tab = GosubTab::new(url.as_str(), title.as_str());
+        let tab_id = tab.id();
+
+        // add tab to manager, and notify the tab has changed. This will update the
+        // tab-bar during a refresh-tabs call.
+        let mut manager = self.tab_manager.lock().unwrap();
+        tab.set_loading(true);
+        manager.add_tab(tab, position);
+        manager.notify_tab_changed(tab_id);
+        drop(manager);
+        self.refresh_tabs();
+
+        // Async load the favicon and the url contents
+        self.load_favicon_async(tab_id);
+        self.load_url_async(tab_id);
+    }
 }
 
 fn load_about_url(url: String) -> String {
@@ -621,4 +649,16 @@ fn load_about_url(url: String) -> String {
             "#
         .to_string(),
     }
+}
+
+/// Fetches the title from a HTML code snippet, or returns None if no title is found
+fn fetch_title_from_html(html: &str) -> Option<String> {
+    let start_tag = "<title>";
+    let end_tag = "</title>";
+
+    let start_index = html.find(start_tag)? + start_tag.len();
+    let end_index = html[start_index..].find(end_tag)? + start_index;
+    let title = &html[start_index..end_index];
+
+    Some(title.to_string())
 }

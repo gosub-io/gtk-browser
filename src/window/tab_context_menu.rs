@@ -23,34 +23,64 @@ pub(crate) struct TabInfo {
 }
 
 pub(crate) fn setup_context_menu_actions(action_group: &SimpleActionGroup, window: &super::BrowserWindow, info: TabInfo) {
+    let window_clone = window.clone();
+
     // New Tab to Right
-    let new_tab_right = SimpleAction::new("new_tab_right", None);
+    let new_tab_right = SimpleAction::new("new-tab-right", None);
     new_tab_right.connect_activate(move |_, _| {
-        // Implement the action
-        // Example: window.imp().open_new_tab_to_right(tab_id.clone());
+        let sender = window_clone.imp().sender.clone();
+        runtime().spawn(clone!(
+            #[strong]
+            sender,
+            async move {
+                sender
+                    .send(Message::OpenTabRight(info.id, "about:blank".into(), "New Tab".into()))
+                    .await
+                    .unwrap();
+            }
+        ));
     });
     action_group.add_action(&new_tab_right);
 
     // Reload Tab
-    let reload_tab = SimpleAction::new("reload_tab", None);
+    let window_clone = window.clone();
+    let reload_tab = SimpleAction::new("reload", None);
     reload_tab.connect_activate(move |_, _| {
-        // window.imp().reload_tab(tab_id.clone());
+        let manager = window_clone.imp().tab_manager.lock().unwrap();
+        if let Some(tab) = manager.get_tab(info.id) {
+            let sender = window_clone.imp().sender.clone();
+            runtime().spawn(clone!(
+                #[strong]
+                sender,
+                async move {
+                    sender.send(Message::LoadUrl(info.id, tab.url().to_string())).await.unwrap();
+                }
+            ));
+        }
     });
     action_group.add_action(&reload_tab);
 
     // Mute Tab
-    let mute_tab = SimpleAction::new("mute_tab", None);
+    let window_clone = window.clone();
+    let mute_tab = SimpleAction::new("mute", None);
     mute_tab.connect_activate(move |_, _| {
-        // window.imp().mute_tab(tab_id.clone());
+        // @todo: implement mute tab
+        let sender = window_clone.imp().sender.clone();
+        runtime().spawn(clone!(
+            #[strong]
+            sender,
+            async move {
+                sender.send(Message::Log("Tab should be muted".into())).await.unwrap();
+            }
+        ));
     });
     action_group.add_action(&mute_tab);
 
     // Pin Tab
-    let pin_tab = SimpleAction::new("pin_tab", None);
+    let pin_tab = SimpleAction::new("pin", None);
     if info.is_pinned {
         pin_tab.set_enabled(false);
     }
-
     let window_clone = window.clone();
     pin_tab.connect_activate(move |_, _| {
         let sender = window_clone.imp().sender.clone();
@@ -65,7 +95,7 @@ pub(crate) fn setup_context_menu_actions(action_group: &SimpleActionGroup, windo
     action_group.add_action(&pin_tab);
 
     // Unpin Tab
-    let unpin_tab = SimpleAction::new("unpin_tab", None);
+    let unpin_tab = SimpleAction::new("unpin", None);
     if !info.is_pinned {
         unpin_tab.set_enabled(false);
     }
@@ -83,54 +113,117 @@ pub(crate) fn setup_context_menu_actions(action_group: &SimpleActionGroup, windo
     action_group.add_action(&unpin_tab);
 
     // Duplicate Tab
-    let duplicate_tab = SimpleAction::new("duplicate_tab", None);
+    let window_clone = window.clone();
+    let duplicate_tab = SimpleAction::new("duplicate", None);
     duplicate_tab.connect_activate(move |_, _| {
-        // window.imp().duplicate_tab(tab_id.clone());
+        // @todo: implement duplicate tab
+        let sender = window_clone.imp().sender.clone();
+        runtime().spawn(clone!(
+            #[strong]
+            sender,
+            async move {
+                sender.send(Message::Log("Tab should be duplicated".into())).await.unwrap();
+            }
+        ));
     });
     action_group.add_action(&duplicate_tab);
 
     // Close Tab
-    let close_tab = SimpleAction::new("close_tab", None);
+    let close_tab = SimpleAction::new("close", None);
     let window_clone = window.clone();
     close_tab.connect_activate(move |_, _| {
         window_clone.imp().close_tab(info.id);
+        _ = window_clone.imp().get_sender().send_blocking(Message::RefreshTabs());
     });
     action_group.add_action(&close_tab);
 
     // Reopen Closed Tab
-    let reopen_closed_tab = SimpleAction::new("reopen_closed_tab", None);
+    let reopen_closed_tab = SimpleAction::new("reopen", None);
     reopen_closed_tab.connect_activate(move |_, _| {
-        // window.imp().reopen_closed_tab();
+        // @todo: implement reopen closed tab
     });
     action_group.add_action(&reopen_closed_tab);
 
     // Close Tabs to Left
-    let close_tabs_left = SimpleAction::new("close_tabs_left", None);
+    let window_clone = window.clone();
+    let close_tabs_left = SimpleAction::new("close-left", None);
     if info.is_pinned || info.is_left {
         close_tabs_left.set_enabled(false);
     }
     close_tabs_left.connect_activate(move |_, _| {
-        // window.imp().close_tabs_to_left(tab_id.clone());
+        let mut tabs_to_close = vec![];
+
+        let manager = window_clone.imp().tab_manager.lock().unwrap();
+        for tab_id in manager.order() {
+            if let Some(tab) = manager.get_tab(tab_id) {
+                // pinned tab, we cannot close
+                if !tab.is_pinned() {
+                    continue;
+                }
+                // our tab is found, so break the loop
+                if tab_id == info.id {
+                    break;
+                }
+                // Just add this tab to the list
+                tabs_to_close.push(tab_id);
+            }
+        }
+        drop(manager);
+
+        // close all the tabs we need to close
+        for tab_id in tabs_to_close {
+            window_clone.imp().close_tab(tab_id);
+        }
+        _ = window_clone.imp().get_sender().send_blocking(Message::RefreshTabs());
     });
     action_group.add_action(&close_tabs_left);
 
     // Close Tabs to Right
-    let close_tabs_right = SimpleAction::new("close_tabs_right", None);
+    let window_clone = window.clone();
+    let close_tabs_right = SimpleAction::new("close-right", None);
     if info.is_pinned || info.is_right {
         close_tabs_right.set_enabled(false);
     }
     close_tabs_right.connect_activate(move |_, _| {
-        // window.imp().close_tabs_to_right(tab_id.clone());
+        let mut own_tab_found = false;
+        let mut tabs_to_close = vec![];
+
+        let manager = window_clone.imp().tab_manager.lock().unwrap();
+        for tab_id in manager.order() {
+            if tab_id == info.id {
+                own_tab_found = true;
+                continue;
+            }
+
+            if own_tab_found {
+                tabs_to_close.push(tab_id);
+            }
+        }
+        drop(manager);
+
+        // close all the tabs we need to close
+        for tab_id in tabs_to_close {
+            window_clone.imp().close_tab(tab_id);
+        }
+        _ = window_clone.imp().get_sender().send_blocking(Message::RefreshTabs());
     });
     action_group.add_action(&close_tabs_right);
 
     // Close Other Tabs
-    let close_other_tabs = SimpleAction::new("close_other_tabs", None);
+    let window_clone = window.clone();
+    let close_other_tabs = SimpleAction::new("close-others", None);
     if info.tab_count == 1 {
         close_other_tabs.set_enabled(false);
     }
     close_other_tabs.connect_activate(move |_, _| {
-        // window.imp().close_other_tabs(tab_id.clone());
+        let manager = window_clone.imp().tab_manager.lock().unwrap();
+        let tabs = manager.order();
+        for tab_id in tabs {
+            if tab_id != info.id {
+                window_clone.imp().close_tab(tab_id);
+            }
+        }
+        _ = window_clone.imp().get_sender().send_blocking(Message::RefreshTabs());
     });
     action_group.add_action(&close_other_tabs);
 }
@@ -139,32 +232,32 @@ pub(crate) fn build_context_menu(tab_info: TabInfo) -> Menu {
     let menu = Menu::new();
 
     let section = Menu::new();
-    section.append(Some("New Tab to Right"), Some("tab.new_tab_right"));
+    section.append(Some("New Tab to Right"), Some("tab.new-tab-right"));
     menu.append_section(None, &section);
 
     let section = Menu::new();
-    section.append(Some("Reload Tab"), Some("tab.reload_tab"));
-    section.append(Some("Mute Tab"), Some("tab.mute_tab"));
+    section.append(Some("Reload Tab"), Some("tab.reload"));
+    section.append(Some("Mute Tab"), Some("tab.mute"));
     if tab_info.is_pinned {
-        section.append(Some("Unpin Tab"), Some("tab.unpin_tab"));
+        section.append(Some("Unpin Tab"), Some("tab.unpin"));
     } else {
-        section.append(Some("Pin Tab"), Some("tab.pin_tab"));
+        section.append(Some("Pin Tab"), Some("tab.pin"));
     }
-    section.append(Some("Duplicate Tab"), Some("tab.duplicate_tab"));
+    section.append(Some("Duplicate Tab"), Some("tab.duplicate"));
     menu.append_section(None, &section);
 
     let section = Menu::new();
-    section.append(Some("Close Tab"), Some("tab.close_tab"));
+    section.append(Some("Close Tab"), Some("tab.close"));
 
     let submenu = Menu::new();
-    submenu.append(Some("Close Tabs to Left"), Some("tab.close_tabs_left"));
-    submenu.append(Some("Close Tabs to Right"), Some("tab.close_tabs_right"));
-    submenu.append(Some("Close Other Tabs"), Some("tab.close_other_tabs"));
+    submenu.append(Some("Close Tabs to Left"), Some("tab.close-left"));
+    submenu.append(Some("Close Tabs to Right"), Some("tab.close-right"));
+    submenu.append(Some("Close Other Tabs"), Some("tab.close-others"));
     section.append_submenu(Some("Close Other Tabs"), &submenu);
 
     // @todo: we should only be allowed to reopen closed tab, after we have closed one..
     // this functionality is not yet implemented
-    section.append(Some("Reopen Closed Tab"), Some("tab.reopen_closed_tab"));
+    section.append(Some("Reopen Closed Tab"), Some("tab.reopen"));
     menu.append_section(None, &section);
 
     menu
