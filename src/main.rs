@@ -1,4 +1,5 @@
 mod application;
+mod cookies;
 mod dialog;
 mod fetcher;
 mod tab;
