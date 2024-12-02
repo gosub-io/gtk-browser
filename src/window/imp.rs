@@ -10,14 +10,14 @@ use gtk4::glib::Quark;
 use gtk4::graphene::Point;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{
-    gdk, glib, Button, CompositeTemplate, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings,
-    TemplateChild, TextView, ToggleButton, Widget,
-};
+use gtk4::{gdk, glib, Button, CompositeTemplate, DrawingArea, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
 use log::info;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 use std::sync::Mutex;
+use vello::Renderer;
+use wgpu::SurfaceConfiguration;
+use wgpu::Instance;
 
 // Create a static Quark as a unique key
 static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
@@ -267,6 +267,96 @@ impl BrowserWindow {
                         .vscrollbar_policy(gtk4::PolicyType::Automatic)
                         .vexpand(true)
                         .build();
+
+                    let drawing_area = DrawingArea::new();
+                    drawing_area.connect_realize(move |area| {
+                        // Get the GDK surface from the DrawingArea
+                        let gdk_surface = area.surface().expect("Failed to get GDK surface");
+
+                        // Get the raw window and display handles
+                        let raw_window_handle = gdk_surface.raw_window_handle().unwrap();
+
+                        let instance = Instance::new(wgpu::Backends::all());
+                        let surface = unsafe { instance.create_surface(&raw_window_handle).unwrap() };
+
+                        let adapter = runtime().block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                            power_preference: wgpu::PowerPreference::HighPerformance,
+                            compatible_surface: Some(&surface),
+                            force_fallback_adapter: false,
+                        })).expect("Failed to find an appropriate adapter");
+
+                        let (device, queue) = runtime().block_on(adapter.request_device(
+                            &wgpu::DeviceDescriptor {
+                                features: wgpu::Features::empty(),
+                                limits: wgpu::Limits::default(),
+                                label: None,
+                            },
+                            None,
+                        )).expect("Failed to create device");
+
+                        let mut renderer = Renderer::new(&device).expect("Failed to create Vello renderer");
+
+                        let configure_surface = |width: u32, height: u32| {
+                            let config = SurfaceConfiguration {
+                                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                                format: surface.get_preferred_format(&adapter).unwrap(),
+                                width,
+                                height,
+                                present_mode: wgpu::PresentMode::Fifo,
+                                alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+                                view_formats: vec![],
+                            };
+                            surface.configure(&device, &config);
+                        };
+
+                        let allocation = area.allocation();
+                        configure_surface(allocation.width() as u32, allocation.height() as u32);
+
+                        // Connect to the resize event
+                        area.connect_resize(move |area, width, height| {
+                            configure_surface(width as u32, height as u32);
+                        });
+
+                        drawing_area.connect_draw(move |area, _| {
+                            let size = area.allocation();
+                            let width = size.width() as u32;
+                            let height = size.height() as u32;
+
+                            // Create a new Vello scene
+                            let mut scene = vello::Scene::new();
+                            let mut builder = SceneBuilder::for_scene(&mut scene);
+
+                            // Build your scene (for example, draw a rectangle)
+                            builder.fill(
+                                &Rect::new(0.0, 0.0, width as f64, height as f64),
+                                &Color::rgb8(0, 128, 255),
+                            );
+
+                            // Render the scene
+                            let surface_texture = surface.get_current_texture().expect("Failed to get surface texture");
+                            let view = surface_texture
+                                .texture
+                                .create_view(&wgpu::TextureViewDescriptor::default());
+
+                            block_on(renderer.render_to_surface(
+                                &device,
+                                &queue,
+                                &scene,
+                                &view,
+                                width,
+                                height,
+                            ))
+                                .expect("Failed to render with Vello");
+
+                            // Present the frame
+                            surface_texture.present();
+
+                            Inhibit(false)
+                        });
+                    });
+
+
+
 
                     let content = TextView::builder().editable(false).wrap_mode(gtk4::WrapMode::Word).build();
                     content.buffer().set_text(tab.content());
