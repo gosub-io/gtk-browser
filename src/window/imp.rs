@@ -2,22 +2,31 @@ use crate::tab::{GosubTab, GosubTabManager, TabCommand, TabId};
 use crate::window::message::Message;
 use crate::window::tab_context_menu::{build_context_menu, setup_context_menu_actions, TabInfo};
 use crate::{fetcher, runtime};
+use ashpd::WindowIdentifier;
 use async_channel::{Receiver, Sender};
+use futures::executor::block_on;
 use glib::subclass::InitializingObject;
 use gtk4::gio::SimpleActionGroup;
 use gtk4::glib::subclass::Signal;
-use gtk4::glib::Quark;
+use gtk4::glib::{spawn_future_local, Quark};
 use gtk4::graphene::Point;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{gdk, glib, Button, CompositeTemplate, DrawingArea, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
+use gtk4::{
+    gdk, glib, Button, CompositeTemplate, DrawingArea, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow,
+    Settings, TemplateChild, TextView, ToggleButton, Widget,
+};
 use log::info;
 use once_cell::sync::Lazy;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::Mutex;
-use vello::Renderer;
-use wgpu::SurfaceConfiguration;
+use vello::kurbo::{Affine, Rect};
+use vello::peniko::{Brush, Color, Fill};
+use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions};
+use wgpu::util::{backend_bits_from_env, dx12_shader_compiler_from_env, gles_minor_version_from_env};
 use wgpu::Instance;
+use wgpu::{Backends, Dx12Compiler, InstanceDescriptor, SurfaceConfiguration, TextureFormat};
 
 // Create a static Quark as a unique key
 static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
@@ -269,98 +278,184 @@ impl BrowserWindow {
                         .build();
 
                     let drawing_area = DrawingArea::new();
-                    drawing_area.connect_realize(move |area| {
-                        // Get the GDK surface from the DrawingArea
-                        let gdk_surface = area.surface().expect("Failed to get GDK surface");
 
-                        // Get the raw window and display handles
-                        let raw_window_handle = gdk_surface.raw_window_handle().unwrap();
+                    println!("drawing area created");
 
-                        let instance = Instance::new(wgpu::Backends::all());
-                        let surface = unsafe { instance.create_surface(&raw_window_handle).unwrap() };
+                    drawing_area.set_draw_func(|area, _cx, width, height| {
+                        spawn_future_local(glib::clone!(
+                            #[strong]
+                            area,
+                            async move {
+                                println!("draw func"); 
+                                
+                                let instance = Instance::new(InstanceDescriptor {
+                                    backends: backend_bits_from_env().unwrap_or(Backends::all()),
+                                    dx12_shader_compiler: dx12_shader_compiler_from_env().unwrap_or_default(),
+                                    gles_minor_version: gles_minor_version_from_env().unwrap_or_default(),
+                                    ..Default::default()
+                                });
 
-                        let adapter = runtime().block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                            power_preference: wgpu::PowerPreference::HighPerformance,
-                            compatible_surface: Some(&surface),
-                            force_fallback_adapter: false,
-                        })).expect("Failed to find an appropriate adapter");
+                                let adapter = instance
+                                    .request_adapter(&wgpu::RequestAdapterOptions {
+                                        power_preference: wgpu::PowerPreference::HighPerformance,
+                                        compatible_surface: None,
+                                        force_fallback_adapter: false,
+                                    })
+                                    .await
+                                    .expect("Failed to find an appropriate adapter");
 
-                        let (device, queue) = runtime().block_on(adapter.request_device(
-                            &wgpu::DeviceDescriptor {
-                                features: wgpu::Features::empty(),
-                                limits: wgpu::Limits::default(),
-                                label: None,
-                            },
-                            None,
-                        )).expect("Failed to create device");
+                                println!("adapter!");
 
-                        let mut renderer = Renderer::new(&device).expect("Failed to create Vello renderer");
+                                let (device, queue) = adapter
+                                    .request_device(
+                                        &wgpu::DeviceDescriptor {
+                                            label: None,
+                                            required_features: Default::default(),
+                                            required_limits: Default::default(),
+                                            memory_hints: Default::default(),
+                                        },
+                                        None,
+                                    )
+                                    .await
+                                    .expect("Failed to create device");
 
-                        let configure_surface = |width: u32, height: u32| {
-                            let config = SurfaceConfiguration {
-                                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                                format: surface.get_preferred_format(&adapter).unwrap(),
-                                width,
-                                height,
-                                present_mode: wgpu::PresentMode::Fifo,
-                                alpha_mode: wgpu::CompositeAlphaMode::Opaque,
-                                view_formats: vec![],
-                            };
-                            surface.configure(&device, &config);
-                        };
+                                // Get the GDK surface from the DrawingArea
+                                let native = area.native().expect("Failed to get GDK surface");
 
-                        let allocation = area.allocation();
-                        configure_surface(allocation.width() as u32, allocation.height() as u32);
+                                println!("native");
+                                
+                                dbg!(native.display().backend());
 
-                        // Connect to the resize event
-                        area.connect_resize(move |area, width, height| {
-                            configure_surface(width as u32, height as u32);
-                        });
+                                let handle = WindowIdentifier::from_native(&native).await.unwrap();
 
-                        drawing_area.connect_draw(move |area, _| {
-                            let size = area.allocation();
-                            let width = size.width() as u32;
-                            let height = size.height() as u32;
+                                println!("handle");
 
-                            // Create a new Vello scene
-                            let mut scene = vello::Scene::new();
-                            let mut builder = SceneBuilder::for_scene(&mut scene);
+                                let surface = instance.create_surface(handle).unwrap();
 
-                            // Build your scene (for example, draw a rectangle)
-                            builder.fill(
-                                &Rect::new(0.0, 0.0, width as f64, height as f64),
-                                &Color::rgb8(0, 128, 255),
-                            );
+                                println!("surface created");
 
-                            // Render the scene
-                            let surface_texture = surface.get_current_texture().expect("Failed to get surface texture");
-                            let view = surface_texture
-                                .texture
-                                .create_view(&wgpu::TextureViewDescriptor::default());
+                               
+                                println!("device! and queue");
 
-                            block_on(renderer.render_to_surface(
-                                &device,
-                                &queue,
-                                &scene,
-                                &view,
-                                width,
-                                height,
-                            ))
-                                .expect("Failed to render with Vello");
+                                let capabilities = surface.get_capabilities(&adapter);
+                                let format = capabilities
+                                    .formats
+                                    .into_iter()
+                                    .find(|it| matches!(it, TextureFormat::Rgba8Unorm | TextureFormat::Bgra8Unorm))
+                                    .unwrap();
 
-                            // Present the frame
-                            surface_texture.present();
+                                let mut renderer = Renderer::new(
+                                    &device,
+                                    RendererOptions {
+                                        surface_format: Some(format),
+                                        use_cpu: false,
+                                        antialiasing_support: AaSupport::all(),
+                                        num_init_threads: NonZeroUsize::new(4),
+                                    },
+                                )
+                                .expect("Failed to create Vello renderer");
 
-                            Inhibit(false)
-                        });
+                                println!("renderer");
+
+                                // let allocation = area.allocation();
+
+                                // let configure_surface = |width: u32, height: u32| {
+
+                                // };
+
+                                // configure_surface(allocation.width() as u32, allocation.height() as u32);
+
+                                // Connect to the resize event
+                                // area.connect_resize(move |area, width, height| {
+                                //     configure_surface(width as u32, height as u32);
+                                // });
+
+                                // area.set_draw_func(move |area, cx, width, height| {
+                                // let width = width as u32;
+                                // let height = height as u32;
+                                
+                                
+                                let width = 1126;
+                                let height = 870;
+
+                                // Create a new Vello scene
+                                let mut scene = vello::Scene::new();
+
+                                // Build your scene (for example, draw a rectangle)
+                                // scene.fill(
+                                //     &Rect::new(0.0, 0.0, width as f64, height as f64),
+                                //     &Color::rgb8(0, 128, 255),
+                                // );
+
+                                let config = SurfaceConfiguration {
+                                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                                    format,
+                                    width,
+                                    height,
+                                    present_mode: wgpu::PresentMode::Fifo,
+                                    desired_maximum_frame_latency: 0,
+                                    alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+                                    view_formats: vec![],
+                                };
+                                surface.configure(&device, &config);
+
+                                println!("configured surface");
+
+                                scene.fill(
+                                    Fill::NonZero,
+                                    Affine::IDENTITY,
+                                    &Brush::Solid(Color::AQUAMARINE),
+                                    None,
+                                    &Rect::new(0.0, 0.0, width as f64, height as f64),
+                                );
+
+                                scene.fill(
+                                    Fill::NonZero,
+                                    Affine::IDENTITY,
+                                    &Brush::Solid(Color::ORANGE),
+                                    None,
+                                    &Rect::new(
+                                        ((width / 2) - 50) as f64,
+                                        ((height / 2) - 25) as f64,
+                                        ((width / 2) + 50) as f64,
+                                        ((height / 2) + 25) as f64,
+                                    ),
+                                );
+
+                                println!("scene");
+
+                                // Render the scene
+                                let surface_texture = surface.get_current_texture().expect("Failed to get surface texture");
+                                // let view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                                renderer
+                                    .render_to_surface(
+                                        &device,
+                                        &queue,
+                                        &scene,
+                                        &surface_texture,
+                                        &RenderParams {
+                                            height,
+                                            width,
+                                            base_color: Color::WHITE,
+                                            antialiasing_method: AaConfig::Msaa16,
+                                        },
+                                    )
+                                    .expect("Failed to render with Vello");
+                                println!("renderer");
+
+                                // Present the frame
+                                surface_texture.present();
+
+                                println!("presenting!")
+                            }
+                        ));
                     });
+                    // });
 
-
-
-
-                    let content = TextView::builder().editable(false).wrap_mode(gtk4::WrapMode::Word).build();
-                    content.buffer().set_text(tab.content());
-                    scrolled_window.set_child(Some(&content));
+                    // let content = TextView::builder().editable(false).wrap_mode(gtk4::WrapMode::Word).build();
+                    // content.buffer().set_text(tab.content());
+                    scrolled_window.set_child(Some(&drawing_area));
                     scrolled_window.set_tab_id(tab.id());
 
                     // Since a tab contains a box, we just update the child inside the box. This way

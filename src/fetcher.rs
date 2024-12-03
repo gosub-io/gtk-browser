@@ -54,8 +54,8 @@ pub async fn fetch_url(url: &str) -> Result<Response, Error> {
 
     let response = client.execute(request).await?;
 
-    println!("Response Status: {:?}", response.status());
-    println!("Response Headers: {:#?}", response.headers());
+    // println!("Response Status: {:?}", response.status());
+    // println!("Response Headers: {:#?}", response.headers());
 
     Ok(response)
 }
