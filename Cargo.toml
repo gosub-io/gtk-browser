@@ -19,6 +19,7 @@ wgpu = "22.1.0"
 vello = "0.3.0"
 futures = "0.3.31"
 ashpd = { version = "0.10.2", features = ["raw_handle", "gtk4_wayland", "gtk4_x11", "raw-window-handle", "gtk4"] }
+futures-intrusive = "0.5.0"
 
 [build-dependencies]
 glib-build-tools = "0.20.0"

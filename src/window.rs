@@ -4,6 +4,7 @@ use gtk4::glib::{clone, spawn_future_local};
 mod imp;
 mod message;
 mod tab_context_menu;
+pub(crate) mod vello_render;
 // mod vellowidget;
 
 use crate::application::Application;

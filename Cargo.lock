@@ -1197,6 +1197,7 @@ dependencies = [
  "chrono",
  "colog",
  "futures",
+ "futures-intrusive",
  "glib-build-tools",
  "gtk-macros",
  "gtk4",
