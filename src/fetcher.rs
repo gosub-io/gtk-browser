@@ -48,14 +48,14 @@ pub async fn fetch_url(url: &str) -> Result<Response, Error> {
     let request_builder = client.get(url).headers(headers);
     let request = request_builder.build()?;
 
-    println!("Request Method: {:?}", request.method());
-    println!("Request URL: {:?}", request.url());
-    println!("Request Headers: {:#?}", request.headers());
+    // println!("Request Method: {:?}", request.method());
+    // println!("Request URL: {:?}", request.url());
+    // println!("Request Headers: {:#?}", request.headers());
 
     let response = client.execute(request).await?;
 
-    println!("Response Status: {:?}", response.status());
-    println!("Response Headers: {:#?}", response.headers());
+    // println!("Response Status: {:?}", response.status());
+    // println!("Response Headers: {:#?}", response.headers());
 
     Ok(response)
 }

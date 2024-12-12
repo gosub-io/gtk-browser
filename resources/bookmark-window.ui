@@ -1,0 +1,107 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<interface>
+    <template class="BookmarkWindow" parent="GtkApplicationWindow">
+        <property name="default-height">600</property>
+        <property name="default-width">800</property>
+        <property name="title">Bookmarks</property>
+        <child>
+            <object class="GtkPaned" id="paned">
+                <property name="orientation">horizontal</property>
+                <property name="position">276</property>
+                <property name="resize-start-child">False</property>
+                <property name="shrink-start-child">False</property>
+                <property name="wide-handle">True</property>
+                <child>
+                    <object class="GtkBox">
+                        <property name="orientation">vertical</property>
+                        <child>
+                            <object class="GtkScrolledWindow" id="time_filters_scrolled">
+                                <property name="hexpand">True</property>
+                                <child>
+                                    <object class="GtkListView" id="list_view">
+                                        <property name="show-expanders">true</property>
+                                        <child>
+                                            <object class="GtkTreeExpander" id="tree_expander">
+                                                <property name="child-visible">true</property>
+                                                <property name="reveal-flags">reveal-child</property>
+                                                <child>
+                                                    <object class="GtkBox">
+                                                        <property name="margin-start">4</property>
+                                                        <property name="spacing">9</property>
+                                                        <child>
+                                                            <object class="GtkImage" id="favicon_4">
+                                                                <property name="icon-name">document-open-recent</property>
+                                                                <property name="pixel-size">16</property>
+                                                            </object>
+                                                        </child>
+                                                        <child>
+                                                            <object class="GtkLabel" id="today_label_3">
+                                                                <property name="label">Yesterdam (5 items)</property>
+                                                                <property name="xalign">0</property>
+                                                            </object>
+                                                        </child>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkCalendar">
+                                <property name="valign">end</property>
+                                <property name="year">2024</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+                <child>
+                    <object class="GtkBox" id="bookmarks_section">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">10</property>
+                        <child>
+                            <object class="GtkSearchEntry" id="search_entry">
+                                <property name="halign">fill</property>
+                                <property name="hexpand">true</property>
+                                <property name="placeholder-text">Search bookmarks...</property>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkScrolledWindow" id="bookmarks_scrolled">
+                                <property name="hexpand">true</property>
+                                <property name="vexpand">true</property>
+                                <child>
+                                    <object class="GtkListBox" id="bookmarks_list">
+                                        <child>
+                                            <object class="GtkBox" id="bookmark_1">
+                                                <property name="orientation">horizontal</property>
+                                                <property name="spacing">10</property>
+                                                <child>
+                                                    <object class="GtkImage" id="favicon_1">
+                                                        <property name="icon-name">image-missing</property>
+                                                        <property name="pixel-size">16</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkLabel" id="site_title_1">
+                                                        <property name="label">Example Site</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkLabel" id="url_1">
+                                                        <property name="label">https://example.com</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </template>
+</interface>

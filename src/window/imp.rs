@@ -480,7 +480,7 @@ impl BrowserWindow {
 
     /// Handles all message coming from the async (tokio) tasks
     pub async fn handle_message(&self, message: Message) {
-        info!("Received a message: {:?}", message);
+        // info!("Received a message: {:?}", message);
 
         match message {
             Message::RefreshTabs() => {

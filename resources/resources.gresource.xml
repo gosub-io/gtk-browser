@@ -2,6 +2,7 @@
 <gresources>
     <gresource prefix="/io/gosub/browser-gtk/ui">
         <file compressed="true" preprocess="xml-stripblanks">window.ui</file>
+        <file compressed="true" preprocess="xml-stripblanks">bookmark-window.ui</file>
         <file compressed="true" preprocess="xml-stripblanks">main_menu.ui</file>
     </gresource>
     <gresource prefix="/io/gosub/browser-gtk/assets">
