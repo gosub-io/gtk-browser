@@ -1,5 +1,6 @@
 use gtk4::{gio, glib};
-use gtk4::prelude::{GtkApplicationExt, GtkWindowExt};
+use gtk4::prelude::*;
+use gtk4::subclass::prelude::ObjectSubclassIsExt;
 use crate::application::Application;
 
 mod imp;
@@ -20,84 +21,47 @@ impl BookmarkWindow {
         window.set_decorated(true);
         window.set_default_size(1024, 768);
 
+        // let items = StringList::new(&["Item 1", "Item 2", "Item 3", "Item 4", "Item 5"]);
+        // let selection_model = SingleSelection::new(Some(items));
+        //
+        // let factory = SignalListItemFactory::new();
+        // factory.connect_setup(move |_, list_item| {
+        //     let label = gtk4::Label::new(None);
+        //     label.set_margin_top(5);
+        //     label.set_margin_bottom(5);
+        //     label.set_margin_start(10);
+        //     label.set_margin_end(10);
+        //
+        //     let list_item = list_item
+        //         .downcast_ref::<ListItem>()
+        //         .expect("list_item not a ListItem");
+        //
+        //     list_item.set_child(Some(&label));
+        //
+        //     list_item
+        //         .property_expression("item")
+        //         .chain_property::<StringObject>("string")
+        //         .bind(&label, "label", Widget::NONE);
+        // });
+        //
+        // // factory.connect_bind(move |_, list_item| {
+        // //     // Update the label text for each list item
+        // //     let label = list_item.child().and_then(|c| c.downcast::<gtk4::Label>().ok());
+        // //     let item = list_item.item().and_then(|i| i.downcast::<String>().ok());
+        // //     if let (Some(label), Some(item)) = (label, item) {
+        // //         label.set_text(item.as_str());
+        // //     }
+        // // });
+        //
+        // window.imp().gtk_list_view.set_factory(Some(&factory));
+        // window.imp().gtk_list_view.set_model(Some(&selection_model));
+
         // Self::connect_actions(app, &window);
         // Self::connect_accelerators(app, &window);
 
+
+        window.imp().load_mock_data();
+
         window
     }
-
-    // fn connect_accelerators(app: &Application, _window: &Self) {
-    //     app.set_accels_for_action("app.open-new-tab", &["<Primary>T"]);
-    //     app.set_accels_for_action("app.close-tab", &["<Primary>W"]);
-    //     app.set_accels_for_action("app.toggle-log", &["<Primary>L"]);
-    // }
-    //
-    // fn connect_actions(app: &Application, window: &Self) {
-    //     let logwindow_action = SimpleAction::new("toggle-log", None);
-    //     logwindow_action.connect_activate({
-    //         let window_clone = window.clone();
-    //         move |_, _| {
-    //             window_clone
-    //                 .imp()
-    //                 .log_scroller
-    //                 .set_visible(!window_clone.imp().log_scroller.get_visible());
-    //         }
-    //     });
-    //     app.add_action(&logwindow_action);
-    //
-    //     // Create new tab
-    //     let window_clone = window.clone();
-    //     let new_tab_action = SimpleAction::new("open-new-tab", None);
-    //     new_tab_action.connect_activate(move |_, _| {
-    //         let sender = window_clone.imp().sender.clone();
-    //         runtime().spawn(clone!(
-    //             #[strong]
-    //             sender,
-    //             async move {
-    //                 sender.send(Message::OpenTab("about:blank".into(), "New Tab".into())).await.unwrap();
-    //             }
-    //         ));
-    //     });
-    //     app.add_action(&new_tab_action);
-    //
-    //     let tab_bar = window.imp().tab_bar.clone();
-    //     tab_bar.connect_page_added({
-    //         let window_clone = window.clone();
-    //         move |_notebook, _, page_num| {
-    //             window_clone
-    //                 .imp()
-    //                 .log(format!("[result] added a tab on page {}", page_num).as_str());
-    //         }
-    //     });
-    //
-    //     tab_bar.connect_page_removed({
-    //         let window_clone = window.clone();
-    //         move |_notebook, _widget, page_num| {
-    //             window_clone.imp().log(format!("[result] removed tab: {}", page_num).as_str());
-    //         }
-    //     });
-    //
-    //     tab_bar.connect_page_reordered({
-    //         let window_clone = window.clone();
-    //         move |_notebook, page, page_num| {
-    //             window_clone
-    //                 .imp()
-    //                 .log(format!("[result] reordered tab: [{:?}] to {}", page.get_tab_id(), page_num).as_str());
-    //         }
-    //     });
-    //
-    //     tab_bar.connect_switch_page({
-    //         let window_clone = window.clone();
-    //         move |_notebook, page, page_num| {
-    //             window_clone.imp().log(format!("[result] switched to tab: {}", page_num).as_str());
-    //
-    //             if let Some(tab_id) = page.get_tab_id() {
-    //                 let manager = window_clone.imp().tab_manager.lock().unwrap();
-    //                 let tab = manager.get_tab(tab_id).unwrap();
-    //                 window_clone.imp().searchbar.set_text(tab.url());
-    //                 drop(manager);
-    //             }
-    //         }
-    //     });
-    // }
 }

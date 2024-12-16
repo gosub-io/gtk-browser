@@ -15,37 +15,8 @@
                     <object class="GtkBox">
                         <property name="orientation">vertical</property>
                         <child>
-                            <object class="GtkScrolledWindow" id="time_filters_scrolled">
+                            <object class="GtkListView" id="gtk_list_view">
                                 <property name="hexpand">True</property>
-                                <child>
-                                    <object class="GtkListView" id="list_view">
-                                        <property name="show-expanders">true</property>
-                                        <child>
-                                            <object class="GtkTreeExpander" id="tree_expander">
-                                                <property name="child-visible">true</property>
-                                                <property name="reveal-flags">reveal-child</property>
-                                                <child>
-                                                    <object class="GtkBox">
-                                                        <property name="margin-start">4</property>
-                                                        <property name="spacing">9</property>
-                                                        <child>
-                                                            <object class="GtkImage" id="favicon_4">
-                                                                <property name="icon-name">document-open-recent</property>
-                                                                <property name="pixel-size">16</property>
-                                                            </object>
-                                                        </child>
-                                                        <child>
-                                                            <object class="GtkLabel" id="today_label_3">
-                                                                <property name="label">Yesterdam (5 items)</property>
-                                                                <property name="xalign">0</property>
-                                                            </object>
-                                                        </child>
-                                                    </object>
-                                                </child>
-                                            </object>
-                                        </child>
-                                    </object>
-                                </child>
                             </object>
                         </child>
                         <child>
@@ -72,31 +43,52 @@
                                 <property name="hexpand">true</property>
                                 <property name="vexpand">true</property>
                                 <child>
-                                    <object class="GtkListBox" id="bookmarks_list">
+                                    <object class="GtkColumnView" id="bookmarks_list">
                                         <child>
-                                            <object class="GtkBox" id="bookmark_1">
-                                                <property name="orientation">horizontal</property>
-                                                <property name="spacing">10</property>
-                                                <child>
-                                                    <object class="GtkImage" id="favicon_1">
-                                                        <property name="icon-name">image-missing</property>
-                                                        <property name="pixel-size">16</property>
+                                            <object class="GtkColumnViewColumn">
+                                                <property name="title">Name</property>
+                                                <property name="expand">1</property>
+                                                <property name="resizable">1</property>
+                                                <property name="factory">
+                                                    <object class="GtkSignalListItemFactory">
+                                                        <signal name="setup" handler="setup_name_cb"/>
+                                                        <signal name="bind" handler="bind_name_cb"/>
                                                     </object>
-                                                </child>
-                                                <child>
-                                                    <object class="GtkLabel" id="site_title_1">
-                                                        <property name="label">Example Site</property>
-                                                    </object>
-                                                </child>
-                                                <child>
-                                                    <object class="GtkLabel" id="url_1">
-                                                        <property name="label">https://example.com</property>
-                                                    </object>
-                                                </child>
+                                                </property>
                                             </object>
                                         </child>
+
+                                        <child>
+                                            <object class="GtkColumnViewColumn">
+                                                <property name="title">Tags</property>
+                                                <property name="expand">1</property>
+                                                <property name="resizable">1</property>
+                                                <property name="factory">
+                                                    <object class="GtkSignalListItemFactory">
+                                                        <signal name="setup" handler="setup_tags_cb"/>
+                                                        <signal name="bind" handler="bind_tags_cb"/>
+                                                    </object>
+                                                </property>
+                                            </object>
+                                        </child>
+
+                                        <child>
+                                            <object class="GtkColumnViewColumn">
+                                                <property name="title">Url</property>
+                                                <property name="expand">1</property>
+                                                <property name="resizable">1</property>
+                                                <property name="factory">
+                                                    <object class="GtkSignalListItemFactory">
+                                                        <signal name="setup" handler="setup_url_cb"/>
+                                                        <signal name="bind" handler="bind_url_cb"/>
+                                                    </object>
+                                                </property>
+                                            </object>
+                                        </child>
+
                                     </object>
                                 </child>
+
                             </object>
                         </child>
                     </object>
