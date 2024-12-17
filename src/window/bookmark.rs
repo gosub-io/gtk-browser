@@ -4,6 +4,7 @@ use gtk4::subclass::prelude::ObjectSubclassIsExt;
 use crate::application::Application;
 
 mod imp;
+mod db;
 
 glib::wrapper! {
     pub struct BookmarkWindow(ObjectSubclass<imp::BookmarkWindow>)

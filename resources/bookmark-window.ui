@@ -86,6 +86,20 @@
                                             </object>
                                         </child>
 
+                                        <child>
+                                            <object class="GtkColumnViewColumn">
+                                                <property name="title">Last accessed</property>
+                                                <property name="expand">1</property>
+                                                <property name="resizable">1</property>
+                                                <property name="factory">
+                                                    <object class="GtkSignalListItemFactory">
+                                                        <signal name="setup" handler="setup_last_accessed_cb"/>
+                                                        <signal name="bind" handler="bind_last_accessed_cb"/>
+                                                    </object>
+                                                </property>
+                                            </object>
+                                        </child>
+
                                     </object>
                                 </child>
 

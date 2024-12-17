@@ -1,5 +1,6 @@
 use std::cell::RefCell;
-use std::hash::Hash;
+use std::collections::HashMap;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use glib::subclass::InitializingObject;
 use gtk4::subclass::prelude::*;
 use gtk4::{glib, CompositeTemplate, ListItem, NoSelection, SignalListItemFactory};
@@ -56,6 +57,7 @@ pub struct RowObjectImpl {
     pub name: RefCell<String>,
     pub tags: RefCell<String>,
     pub url: RefCell<String>,
+    pub last_accessed: RefCell<Option<DateTime<Utc>>>,
 }
 
 #[glib::object_subclass]
@@ -68,7 +70,7 @@ impl ObjectSubclass for RowObjectImpl {
 impl ObjectImpl for RowObjectImpl {}
 
 impl RowObject {
-    pub fn new(icon: Option<Vec<u8>>, name: &str, tags: &str, url: &str) -> Self {
+    pub fn new(icon: Option<Vec<u8>>, name: &str, tags: &str, url: &str, last_accessed: Option<DateTime<Utc>>) -> Self {
         let obj: Self = glib::Object::new::<Self>();
 
         // Now set the fields
@@ -76,6 +78,7 @@ impl RowObject {
         obj.imp().name.replace(name.to_string());
         obj.imp().tags.replace(tags.to_string());
         obj.imp().url.replace(url.to_string());
+        obj.imp().last_accessed.replace(last_accessed);
 
         obj
     }
@@ -95,6 +98,10 @@ impl RowObject {
     pub fn url(&self) -> String {
         self.imp().url.borrow().clone()
     }
+
+    pub fn last_accessed(&self) -> Option<DateTime<Utc>> {
+        self.imp().last_accessed.borrow().clone()
+    }
 }
 
 impl BookmarkWindow {
@@ -103,10 +110,29 @@ impl BookmarkWindow {
 
         let icon = Some(include_bytes!("../../../resources/favicon.png").to_vec());
 
-        // Add rows
-        list_store.append(&RowObject::new(icon.clone(), "Bookmark 1", "Tag1, Tag2", "https://example.com"));
-        list_store.append(&RowObject::new(icon.clone(), "Bookmark 2", "Tag3", "https://example.org"));
-        list_store.append(&RowObject::new(icon.clone(), "Bookmark 3", "Tag4, Tag5", "https://example.net"));
+        let connection = sqlite::open("bookmarks.db").unwrap();
+        let query = "SELECT * FROM bookmarks";
+
+        _ = connection.iterate(query, |pairs| {
+            let row: HashMap<_, _> = pairs
+                .iter()
+                .filter_map(|&(column, value)| Some((column, value?))) // Ignore `None` values
+                .collect();
+
+            list_store.append(&RowObject::new(
+                icon.clone(),
+                row.get("title").unwrap_or(&""),
+                row.get("tags").unwrap_or(&""),
+                row.get("url").unwrap_or(&""),
+                row.get("last_accessed").and_then(|s| {
+                    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                        .ok()
+                        .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+                }),
+            ));
+
+            true
+        });
 
         let selection_model = NoSelection::new(Some(list_store));
         self.bookmarks_list.set_model(Some(&selection_model));
@@ -154,7 +180,6 @@ impl BookmarkWindow {
 
     #[template_callback]
     fn setup_tags_cb(_factory: &SignalListItemFactory, list_item: &ListItem) {
-        println!("setup_tags_cb");
         let label = gtk4::Label::new(None);
         label.set_halign(gtk4::Align::Start);
         list_item.set_child(Some(&label));
@@ -171,7 +196,6 @@ impl BookmarkWindow {
 
     #[template_callback]
     fn setup_url_cb(_factory: &SignalListItemFactory, list_item: &ListItem) {
-        println!("setup_name_cb");
         let label = gtk4::Label::new(None);
         label.set_halign(gtk4::Align::Start);
         list_item.set_child(Some(&label));
@@ -182,6 +206,31 @@ impl BookmarkWindow {
         if let Some(label) = list_item.child().and_then(|c| c.downcast::<gtk4::Label>().ok()) {
             if let Some(row) = list_item.item().and_then(|i| i.downcast::<RowObject>().ok()) {
                 label.set_text(&row.url());
+            }
+        }
+    }
+
+    #[template_callback]
+    fn setup_last_accessed_cb(_factory: &SignalListItemFactory, list_item: &ListItem) {
+        let label = gtk4::Label::new(None);
+        label.set_halign(gtk4::Align::Start);
+        list_item.set_child(Some(&label));
+    }
+
+    #[template_callback]
+    fn bind_last_accessed_cb(_factory: &SignalListItemFactory, list_item: &ListItem) {
+        if let Some(label) = list_item.child().and_then(|c| c.downcast::<gtk4::Label>().ok()) {
+            if let Some(row) = list_item.item().and_then(|i| i.downcast::<RowObject>().ok()) {
+                match row.last_accessed() {
+                    Some(date) => {
+                        let formatter = timeago::Formatter::default();
+                        let human_readable = formatter.convert_chrono(date, Utc::now());
+                        label.set_text(&human_readable);
+                    }
+                    None => {
+                        label.set_text("Never");
+                    }
+                }
             }
         }
     }
