@@ -1,12 +1,12 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use glib::subclass::InitializingObject;
 use gtk4::subclass::prelude::*;
 use gtk4::{glib, CompositeTemplate, ListItem, NoSelection, SignalListItemFactory};
 use gtk4::gdk::Paintable;
 use gtk4::gio::{ListStore};
 use gtk4::prelude::{BoxExt, Cast, ListItemExt, WidgetExt};
+use crate::window::bookmark::db::{Bookmark, BookmarkDb};
 
 #[derive(CompositeTemplate)]
 #[template(resource = "/io/gosub/browser-gtk/ui/bookmark-window.ui")]
@@ -53,11 +53,7 @@ glib::wrapper! {
 
 #[derive(Default)]
 pub struct RowObjectImpl {
-    pub favicon: RefCell<Option<Vec<u8>>>,
-    pub name: RefCell<String>,
-    pub tags: RefCell<String>,
-    pub url: RefCell<String>,
-    pub last_accessed: RefCell<Option<DateTime<Utc>>>,
+    pub bookmark: RefCell<Option<Bookmark>>,
 }
 
 #[glib::object_subclass]
@@ -70,68 +66,42 @@ impl ObjectSubclass for RowObjectImpl {
 impl ObjectImpl for RowObjectImpl {}
 
 impl RowObject {
-    pub fn new(icon: Option<Vec<u8>>, name: &str, tags: &str, url: &str, last_accessed: Option<DateTime<Utc>>) -> Self {
+    pub fn new(bookmark: Bookmark) -> Self {
         let obj: Self = glib::Object::new::<Self>();
-
-        // Now set the fields
-        obj.imp().favicon.replace(icon);
-        obj.imp().name.replace(name.to_string());
-        obj.imp().tags.replace(tags.to_string());
-        obj.imp().url.replace(url.to_string());
-        obj.imp().last_accessed.replace(last_accessed);
-
+        obj.imp().bookmark.replace(Some(bookmark.clone()));
         obj
     }
 
     pub fn icon(&self) -> Option<Vec<u8>> {
-        self.imp().favicon.borrow().clone()
+        self.imp().bookmark.borrow().clone().unwrap().favicon.clone()
     }
 
     pub fn name(&self) -> String {
-        self.imp().name.borrow().clone()
+        self.imp().bookmark.borrow().clone().unwrap().title.to_string()
     }
 
-    pub fn tags(&self) -> String {
-        self.imp().tags.borrow().clone()
+    pub fn tags(&self) -> Vec<String> {
+        self.imp().bookmark.borrow().clone().unwrap().tags.clone()
     }
 
     pub fn url(&self) -> String {
-        self.imp().url.borrow().clone()
+        self.imp().bookmark.borrow().clone().unwrap().url.clone()
     }
 
     pub fn last_accessed(&self) -> Option<DateTime<Utc>> {
-        self.imp().last_accessed.borrow().clone()
+        self.imp().bookmark.borrow().clone().unwrap().last_accessed.clone()
     }
 }
 
 impl BookmarkWindow {
-    pub fn load_mock_data(&self) {
+    pub fn load_bookmarks(&self) {
         let list_store = ListStore::new::<RowObject>();
 
-        let icon = Some(include_bytes!("../../../resources/favicon.png").to_vec());
+        let db = BookmarkDb::new();
+        let bookmarks = db.query("");
 
-        let connection = sqlite::open("bookmarks.db").unwrap();
-        let query = "SELECT * FROM bookmarks";
-
-        _ = connection.iterate(query, |pairs| {
-            let row: HashMap<_, _> = pairs
-                .iter()
-                .filter_map(|&(column, value)| Some((column, value?))) // Ignore `None` values
-                .collect();
-
-            list_store.append(&RowObject::new(
-                icon.clone(),
-                row.get("title").unwrap_or(&""),
-                row.get("tags").unwrap_or(&""),
-                row.get("url").unwrap_or(&""),
-                row.get("last_accessed").and_then(|s| {
-                    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                        .ok()
-                        .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
-                }),
-            ));
-
-            true
+        bookmarks.iter().for_each(|bookmark| {
+            list_store.append(&RowObject::new(bookmark.clone()));
         });
 
         let selection_model = NoSelection::new(Some(list_store));
@@ -189,7 +159,8 @@ impl BookmarkWindow {
     fn bind_tags_cb(_factory: &SignalListItemFactory, list_item: &ListItem) {
         if let Some(label) = list_item.child().and_then(|c| c.downcast::<gtk4::Label>().ok()) {
             if let Some(row) = list_item.item().and_then(|i| i.downcast::<RowObject>().ok()) {
-                label.set_text(&row.tags());
+                let s = row.tags().join(", ");
+                label.set_text(&s);
             }
         }
     }
@@ -221,16 +192,7 @@ impl BookmarkWindow {
     fn bind_last_accessed_cb(_factory: &SignalListItemFactory, list_item: &ListItem) {
         if let Some(label) = list_item.child().and_then(|c| c.downcast::<gtk4::Label>().ok()) {
             if let Some(row) = list_item.item().and_then(|i| i.downcast::<RowObject>().ok()) {
-                match row.last_accessed() {
-                    Some(date) => {
-                        let formatter = timeago::Formatter::default();
-                        let human_readable = formatter.convert_chrono(date, Utc::now());
-                        label.set_text(&human_readable);
-                    }
-                    None => {
-                        label.set_text("Never");
-                    }
-                }
+                label.set_text(Bookmark::date_to_timeago(row.last_accessed()).as_str());
             }
         }
     }

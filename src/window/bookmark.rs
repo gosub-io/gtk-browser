@@ -61,7 +61,7 @@ impl BookmarkWindow {
         // Self::connect_accelerators(app, &window);
 
 
-        window.imp().load_mock_data();
+        window.imp().load_bookmarks();
 
         window
     }

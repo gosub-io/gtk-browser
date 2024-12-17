@@ -1,22 +1,24 @@
-use std::collections::HashMap;
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 
-struct Bookmark {
-    id: usize,
-    title: String,
-    url: String,
-    tags: Vec<String>,
-    created_at: Option<DateTime<Utc>>,
-    last_accessed: Option<DateTime<Utc>>,
-    last_checked: Option<DateTime<Utc>>,
+#[derive(Clone)]
+pub struct Bookmark {
+    _id: usize,
+    pub title: String,
+    pub url: String,
+    pub tags: Vec<String>,
+    pub favicon: Option<Vec<u8>>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub last_accessed: Option<DateTime<Utc>>,
+    pub last_checked: Option<DateTime<Utc>>,
 }
 
 impl Bookmark {
-    pub fn new(id: usize, title: &str, url: &str, tags: Vec<String>, created_at: Option<DateTime<Utc>>, last_accessed: Option<DateTime<Utc>>, last_checked: Option<DateTime<Utc>>) -> Self {
+    pub fn new(id: usize, title: &str, url: &str, favicon: Option<Vec<u8>>, tags: Vec<String>, created_at: Option<DateTime<Utc>>, last_accessed: Option<DateTime<Utc>>, last_checked: Option<DateTime<Utc>>) -> Self {
         Self {
-            id,
+            _id: id,
             title: title.into(),
             url: url.into(),
+            favicon,
             tags,
             created_at,
             last_accessed,
@@ -35,7 +37,7 @@ impl Bookmark {
     }
 }
 
-struct BookmarkDb {
+pub struct BookmarkDb {
     connection: sqlite::Connection,
 }
 
@@ -45,61 +47,46 @@ impl BookmarkDb {
         Self { connection }
     }
 
-    pub fn find_all_bookmarks(&self) -> Vec<Bookmark> {
-        let query = "SELECT * FROM bookmarks";
+    pub fn query(&self, q: &str) -> Vec<Bookmark> {
+        let mut stmt = if q.is_empty() {
+            let query = "SELECT * FROM bookmarks";
+            self.connection.prepare(query).unwrap()
+        } else {
+            let query = "SELECT * FROM bookmarks WHERE \
+                title LIKE :q OR \
+                url LIKE :q OR \
+                tags LIKE :q";
+            let mut stmt = self.connection.prepare(query).unwrap();
+            stmt.bind((":q", q)).unwrap();
+
+            stmt
+        };
 
         let mut rows = vec![];
 
-        _ = self.connection.iterate(query, |pairs| {
-            let row: HashMap<String, String> = pairs
-                .iter()
-                .filter_map(|&(column, value)| Some((column, value?))) // Ignore `None` values
-                .collect();
+        while let sqlite::State::Row = stmt.next().unwrap() {
+            let id: usize = stmt.read::<i64, _>("id").unwrap_or(0) as usize;
+            let title: String = stmt.read::<String, _>("title").unwrap_or_default();
+            let url: String = stmt.read::<String, _>("url").unwrap_or_default();
+            let favicon: Option<Vec<u8>> = stmt.read::<Option<Vec<u8>>, _>("favicon").unwrap_or_default();
+            let tags_str: String = stmt.read::<String, _>("tags").unwrap_or_default();
+            let created_at: String = stmt.read::<String, _>("created_at").unwrap_or_default();
+            let last_accessed: String = stmt.read::<String, _>("last_accessed").unwrap_or_default();
+            let last_checked: String = stmt.read::<String, _>("last_checked").unwrap_or_default();
 
+            let tags: Vec<String> = tags_str.split(',').map(|s| s.trim().to_string()).collect();
 
             rows.push(Bookmark::new(
-                row.get("id").unwrap_or("0".into()).parse().unwrap(),
-                row.get("title").unwrap_or("".into()).into(),
-                row.get("url").unwrap_or("".into()).into(),
-                row.get("tags").unwrap_or("".into()).split(",").collect(),
-                to_datetime(row.get("created_at")),
-                to_datetime(row.get("last_accessed")),
-                to_datetime(row.get("last_checked")),
+                id,
+                &title,
+                &url,
+                favicon,
+                tags,
+                to_datetime(&created_at),
+                to_datetime(&last_accessed),
+                to_datetime(&last_checked),
             ));
-        });
-
-        rows
-    }
-
-    pub fn query(&self, q: &str) -> Vec<Bookmark> {
-        let mut rows = vec![];
-
-        let query = "SELECT * FROM bookmarks WHERE\
-            title LIKE :q OR\
-            url LIKE :q OR\
-            tags LIKE :q";
-        let mut statement = self.connection.prepare(query).unwrap();
-        statement.bind((":q", format!("%{}%", q)) ).unwrap();
-
-
-        let res = self.connection.execute(statement).unwrap();
-
-        _ = self.connection.iterate(query, |pairs| {
-            let row: HashMap<_, _> = pairs
-                .iter()
-                .filter_map(|&(column, value)| Some((column, value?)))
-                .collect();
-
-            rows.push(Bookmark {
-                id: row.get("id").unwrap_or(&0),
-                title: row.get("title").unwrap_or(&""),
-                url: row.get("url").unwrap_or(&""),
-                tags: row.get("tags").unwrap_or(&"").split(",").collect(),
-                created_at: row.get("created_at").unwrap_or(None),
-                last_accessed: row.get("last_accessed").unwrap_or(None),
-                last_checked: row.get("last_checked").unwrap_or(None),
-            });
-        });
+        }
 
         rows
     }
@@ -108,7 +95,7 @@ impl BookmarkDb {
 
 fn to_datetime(dt: &str) -> Option<DateTime<Utc>> {
     let r = chrono::NaiveDateTime::parse_from_str(dt, "%Y-%m-%d %H:%M:%S")
-        .map(|d| DateTime::from_naive_utc_and_offset(d, Utc))
+        .map(|d| DateTime::from_naive_utc_and_offset(d, Utc));
 
     match r {
         Ok(dt) => Some(dt),
