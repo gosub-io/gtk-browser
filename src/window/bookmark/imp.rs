@@ -5,7 +5,7 @@ use gtk4::subclass::prelude::*;
 use gtk4::{glib, CompositeTemplate, ListItem, NoSelection, SignalListItemFactory};
 use gtk4::gdk::Paintable;
 use gtk4::gio::{ListStore};
-use gtk4::prelude::{BoxExt, Cast, ListItemExt, WidgetExt};
+use gtk4::prelude::{BoxExt, Cast, EditableExt, ListItemExt, WidgetExt};
 use crate::window::bookmark::db::{Bookmark, BookmarkDb};
 
 #[derive(CompositeTemplate)]
@@ -13,12 +13,15 @@ use crate::window::bookmark::db::{Bookmark, BookmarkDb};
 pub struct BookmarkWindow {
     #[template_child]
     pub bookmarks_list: TemplateChild<gtk4::ColumnView>,
+    #[template_child]
+    pub search_entry: TemplateChild<gtk4::SearchEntry>,
 }
 
 impl Default for BookmarkWindow {
     fn default() -> Self {
         Self {
             bookmarks_list: Default::default(),
+            search_entry: Default::default(),
         }
     }
 }
@@ -94,11 +97,12 @@ impl RowObject {
 }
 
 impl BookmarkWindow {
-    pub fn load_bookmarks(&self) {
+    pub fn load_bookmarks(&self, q: &str) {
+        dbg!("load_bookmarks: ", q);
         let list_store = ListStore::new::<RowObject>();
 
         let db = BookmarkDb::new();
-        let bookmarks = db.query("");
+        let bookmarks = db.query(format!("%{}%", q).as_str());
 
         bookmarks.iter().for_each(|bookmark| {
             list_store.append(&RowObject::new(bookmark.clone()));
@@ -111,6 +115,11 @@ impl BookmarkWindow {
 
 #[gtk4::template_callbacks]
 impl BookmarkWindow {
+    #[template_callback]
+    async fn search_changed_cb(&self, search_entry: &gtk4::SearchEntry) {
+        self.load_bookmarks(search_entry.text().as_str());
+    }
+
     #[template_callback]
     fn setup_name_cb(_factory: &SignalListItemFactory, list_item: &ListItem) {
         let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
@@ -196,6 +205,5 @@ impl BookmarkWindow {
             }
         }
     }
-
 }
 

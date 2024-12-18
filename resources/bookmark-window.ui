@@ -36,6 +36,7 @@
                                 <property name="halign">fill</property>
                                 <property name="hexpand">true</property>
                                 <property name="placeholder-text">Search bookmarks...</property>
+                                <signal name="search-changed" handler="search_changed_cb" swapped="true"/>
                             </object>
                         </child>
                         <child>
