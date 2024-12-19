@@ -1,6 +1,9 @@
-use log::info;
+use crate::cookies::jar::CookieJar;
+use crate::cookies::sqlite_store::SqliteStorage;
+use log::{info, warn};
 use reqwest::header::HeaderMap;
 use reqwest::{Client, Error, Response};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const GOSUB_USERAGENT_STRING: &str = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; Wayland; rv:133.0) Gecko/20100101 Gosub/0.1 Firefox/133.0";
@@ -32,8 +35,19 @@ pub async fn fetch_url(url: &str) -> Result<Response, Error> {
     // headers.insert("Connection", "keep-alive".parse().unwrap());
     headers.insert("DNT", "1".parse().unwrap());
 
+    let jar = match SqliteStorage::new("./gosub_cookies.db") {
+        Ok(store) => {
+            info!("successfully created SqliteStorage");
+            Some(CookieJar::new(Arc::new(Mutex::new(store))))
+        }
+        Err(e) => {
+            info!("failed to create SqliteStorage: {:?}", e);
+            None
+        }
+    };
+
     info!("fetching url {}", url);
-    let client = Client::builder()
+    let mut builder = Client::builder()
         .user_agent(FIREFOX_USERAGENT_STRING)
         .timeout(Duration::from_secs(5))
         .use_rustls_tls() // For HTTP2
@@ -42,20 +56,30 @@ pub async fn fetch_url(url: &str) -> Result<Response, Error> {
         .read_timeout(Duration::from_secs(5))
         .brotli(true)
         .gzip(true)
-        .deflate(true)
-        .build()?;
+        .deflate(true);
+
+    match jar {
+        Some(jar) => {
+            builder = builder.cookie_provider(Arc::new(jar));
+        }
+        None => {
+            info!("no cookie jar");
+        }
+    }
+
+    let client = builder.build()?;
 
     let request_builder = client.get(url).headers(headers);
     let request = request_builder.build()?;
 
-    println!("Request Method: {:?}", request.method());
-    println!("Request URL: {:?}", request.url());
-    println!("Request Headers: {:#?}", request.headers());
+    // println!("Request Method: {:?}", request.method());
+    // println!("Request URL: {:?}", request.url());
+    // println!("Request Headers: {:#?}", request.headers());
 
     let response = client.execute(request).await?;
 
-    println!("Response Status: {:?}", response.status());
-    println!("Response Headers: {:#?}", response.headers());
+    // println!("Response Status: {:?}", response.status());
+    // println!("Response Headers: {:#?}", response.headers());
 
     Ok(response)
 }
@@ -68,7 +92,7 @@ pub async fn fetch_favicon(url: &str) -> Vec<u8> {
     info!("fetching favicon from {}", url);
     let url = format!("{}{}", url, "/favicon.ico");
     let Ok(buf) = fetch_url_body(url.as_str()).await else {
-        info!("Failed to fetch favicon from URL");
+        warn!("Failed to fetch favicon from URL");
         return Vec::new();
     };
 
