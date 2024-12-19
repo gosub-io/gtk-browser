@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+gosub_engine = { path = "../engine" }
 gtk-macros = "0.3"
 gtk4 = { version = "0.9.4", features = ["v4_6", "v4_14"] }
 chrono = { version = "0.4.31", features = [] }

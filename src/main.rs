@@ -3,6 +3,7 @@ mod dialog;
 mod fetcher;
 mod tab;
 mod window;
+pub mod engine;
 
 use crate::application::Application;
 use gtk4::gdk::Display;

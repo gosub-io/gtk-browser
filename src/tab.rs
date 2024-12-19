@@ -4,6 +4,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::str::FromStr;
 use uuid::Uuid;
+use crate::engine::GosubEngineConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct TabId(Uuid);
@@ -59,6 +60,8 @@ pub struct GosubTab {
     favicon: Option<Texture>,
     /// Actual content (HTML) of the tab
     content: String,
+    /// Drawer
+    drawer: Option<GosubEngineConfig>,
 }
 
 impl Debug for GosubTab {
@@ -82,6 +85,7 @@ impl GosubTab {
             title: title.to_string(),
             favicon: None,
             content: String::new(),
+            drawer: None,
         }
     }
 
@@ -180,12 +184,6 @@ impl Default for GosubTabManager {
 
 impl GosubTabManager {
     pub fn new() -> Self {
-        // // Always add an initial tab
-        // let mut tab = GosubTab::new("about:blank", "New tab");
-        // tab.set_loading(false);
-        // let tab_id = manager.add_tab(tab, None);
-        // manager.mark_tab_updated(tab_id);   // This will take care of removing the "loading" spinner.
-
         GosubTabManager {
             tabs: HashMap::new(),
             unpinned_tab_order: VecDeque::new(),
@@ -198,10 +196,6 @@ impl GosubTabManager {
     pub(crate) fn get_by_tab(&self, tab_id: TabId) -> Option<&GosubTab> {
         self.tabs.get(&tab_id)
     }
-
-    // pub(crate) fn get_page_num_by_tab(&self, tab_id: TabId) -> Option<u32> {
-    //     self.tab_order.iter().position(|id| id == &tab_id).map(|pos| pos as u32)
-    // }
 
     pub(crate) fn commands(&mut self) -> Vec<TabCommand> {
         self.commands.drain(..).collect()
