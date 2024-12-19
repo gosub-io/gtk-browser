@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 gtk-macros = "0.3"
 gtk4 = { version = "0.9.4", features = ["v4_6", "v4_14"] }
-chrono = { version = "0.4.31", features = [] }
+chrono = { version = "0.4.39", features = [] }
 reqwest = {  version = "0.12.9", features = ["blocking", "gzip", "brotli", "cookies", "deflate", "http2", "rustls-tls"] }
 uuid = { version = "1.11.0", features = ["v4", "v7"] }
 log = "0.4.22"
