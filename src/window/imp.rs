@@ -1,9 +1,12 @@
+use crate::engine::GosubEngineConfig;
+use crate::eventloop::WindowEventLoopDummy;
 use crate::tab::{GosubTab, GosubTabManager, TabCommand, TabId};
 use crate::window::message::Message;
 use crate::window::tab_context_menu::{build_context_menu, setup_context_menu_actions, TabInfo};
 use crate::{fetcher, runtime};
 use async_channel::{Receiver, Sender};
 use glib::subclass::InitializingObject;
+use gosub_engine::prelude::*;
 use gtk4::gio::SimpleActionGroup;
 use gtk4::glib::subclass::Signal;
 use gtk4::glib::Quark;
@@ -11,11 +14,13 @@ use gtk4::graphene::Point;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::{
-    gdk, glib, Button, CompositeTemplate, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings,
-    TemplateChild, TextView, ToggleButton, Widget,
+    gdk, glib, Button, CompositeTemplate, DrawingArea, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow,
+    Settings, TemplateChild, TextView, ToggleButton, Widget,
 };
 use log::info;
 use once_cell::sync::Lazy;
+use reqwest::Url;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -268,9 +273,43 @@ impl BrowserWindow {
                         .vexpand(true)
                         .build();
 
-                    let content = TextView::builder().editable(false).wrap_mode(gtk4::WrapMode::Word).build();
-                    content.buffer().set_text(tab.content());
-                    scrolled_window.set_child(Some(&content));
+                    if tab.has_drawer() {
+                        let tab_clone = tab.clone();
+
+                        let area = DrawingArea::default();
+                        area.set_draw_func(move |_area, cr, width, height| {
+                            let binding = tab_clone.drawer();
+                            let mut drawer_lock = binding.lock().unwrap();
+
+                            if let Some(drawer) = drawer_lock.as_mut() {
+                                let mut render_backend = <GosubEngineConfig as HasRenderBackend>::RenderBackend::new();
+                                let size = SizeU32::new(width as u32, height as u32);
+
+                                // Drawer.draw will populate the scene with elements from the tree
+                                let mut win_data = WindowData {
+                                    scene: Scene::new(),
+                                    cr: Some(cr.clone()),
+                                };
+                                drawer.draw(&mut render_backend, &mut win_data, size, &WindowEventLoopDummy);
+
+                                let mut active_win_data = ActiveWindowData { cr: cr.clone() };
+                                _ = render_backend.render(&mut win_data, &mut active_win_data);
+
+                                return;
+                            }
+
+                            drop(drawer_lock);
+                        });
+
+                        scrolled_window.set_child(Some(&area));
+                    } else {
+                        // No drawer is (yet) created, so we display a default page (with the gosub logo)
+                        let content = self.generate_default_page();
+                        scrolled_window.set_child(Some(&content));
+                    };
+
+                    // let content = TextView::builder().editable(false).wrap_mode(gtk4::WrapMode::Word).build();
+                    // scrolled_window.set_child(Some(&content));
                     scrolled_window.set_tab_id(tab.id());
 
                     // Since a tab contains a box, we just update the child inside the box. This way
@@ -551,10 +590,14 @@ impl BrowserWindow {
             Message::UrlLoaded(tab_id, html_content) => {
                 let mut manager = self.tab_manager.lock().unwrap();
                 let mut tab = manager.get_tab(tab_id).unwrap().clone();
-                tab.set_content(html_content.clone());
+                tab.set_content(&html_content);
+
+                let url = Url::from_str(tab.url()).unwrap();
+                let d = <GosubEngineConfig as HasTreeDrawer>::TreeDrawer::from_source(url, &html_content, TaffyLayouter, false).unwrap();
+                tab.set_drawer(d);
 
                 // Fetch title from HTML content... poorly..
-                if let Some(title) = fetch_title_from_html(html_content.as_str()) {
+                if let Some(title) = fetch_title_from_html(&html_content) {
                     tab.set_title(title.as_str());
                 } else {
                     let url = tab.url().to_string();
