@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const GOSUB_USERAGENT_STRING: &str = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; Wayland; rv:133.0) Gecko/20100101 Gosub/0.1 Firefox/133.0";
-const FIREFOX_USERAGENT_STRING: &str = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0";
+// const FIREFOX_USERAGENT_STRING: &str = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0";
 
 /// Fetches the (binary) body of a URL and returns it as a Vec<u8>
 pub async fn fetch_url_body(url: &str) -> Result<Vec<u8>, Error> {
@@ -48,7 +48,7 @@ pub async fn fetch_url(url: &str) -> Result<Response, Error> {
 
     info!("fetching url {}", url);
     let mut builder = Client::builder()
-        .user_agent(FIREFOX_USERAGENT_STRING)
+        .user_agent(GOSUB_USERAGENT_STRING)
         .timeout(Duration::from_secs(5))
         .use_rustls_tls() // For HTTP2
         .connect_timeout(Duration::from_secs(5))
@@ -72,15 +72,7 @@ pub async fn fetch_url(url: &str) -> Result<Response, Error> {
     let request_builder = client.get(url).headers(headers);
     let request = request_builder.build()?;
 
-    // println!("Request Method: {:?}", request.method());
-    // println!("Request URL: {:?}", request.url());
-    // println!("Request Headers: {:#?}", request.headers());
-
     let response = client.execute(request).await?;
-
-    // println!("Response Status: {:?}", response.status());
-    // println!("Response Headers: {:#?}", response.headers());
-
     Ok(response)
 }
 

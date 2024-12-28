@@ -1,8 +1,11 @@
+use crate::engine::GosubEngineConfig;
+use gosub_engine::prelude::HasTreeDrawer;
 use gtk4::gdk::Texture;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::fmt::Debug;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -59,6 +62,8 @@ pub struct GosubTab {
     favicon: Option<Texture>,
     /// Actual content (HTML) of the tab
     content: String,
+    /// Drawer
+    drawer: Arc<Mutex<Option<<GosubEngineConfig as HasTreeDrawer>::TreeDrawer>>>,
 }
 
 impl Debug for GosubTab {
@@ -82,7 +87,20 @@ impl GosubTab {
             title: title.to_string(),
             favicon: None,
             content: String::new(),
+            drawer: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn has_drawer(&self) -> bool {
+        self.drawer.lock().unwrap().is_some()
+    }
+
+    pub fn drawer(&self) -> Arc<Mutex<Option<<GosubEngineConfig as HasTreeDrawer>::TreeDrawer>>> {
+        self.drawer.clone()
+    }
+
+    pub fn set_drawer(&mut self, drawer: <GosubEngineConfig as HasTreeDrawer>::TreeDrawer) {
+        self.drawer = Arc::new(Mutex::new(Some(drawer)));
     }
 
     pub fn is_loading(&self) -> bool {
@@ -117,8 +135,8 @@ impl GosubTab {
         self.private = private;
     }
 
-    pub fn set_content(&mut self, content: String) {
-        self.content = content;
+    pub fn set_content(&mut self, content: &str) {
+        self.content = content.to_string();
     }
 
     pub fn content(&self) -> &str {
@@ -180,12 +198,6 @@ impl Default for GosubTabManager {
 
 impl GosubTabManager {
     pub fn new() -> Self {
-        // // Always add an initial tab
-        // let mut tab = GosubTab::new("about:blank", "New tab");
-        // tab.set_loading(false);
-        // let tab_id = manager.add_tab(tab, None);
-        // manager.mark_tab_updated(tab_id);   // This will take care of removing the "loading" spinner.
-
         GosubTabManager {
             tabs: HashMap::new(),
             unpinned_tab_order: VecDeque::new(),
@@ -198,10 +210,6 @@ impl GosubTabManager {
     pub(crate) fn get_by_tab(&self, tab_id: TabId) -> Option<&GosubTab> {
         self.tabs.get(&tab_id)
     }
-
-    // pub(crate) fn get_page_num_by_tab(&self, tab_id: TabId) -> Option<u32> {
-    //     self.tab_order.iter().position(|id| id == &tab_id).map(|pos| pos as u32)
-    // }
 
     pub(crate) fn commands(&mut self) -> Vec<TabCommand> {
         self.commands.drain(..).collect()

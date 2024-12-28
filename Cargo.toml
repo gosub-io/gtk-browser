@@ -2,8 +2,12 @@
 name = "gosub-gtk"
 version = "0.1.0"
 edition = "2021"
+authors = ["Gosub Community <info@gosub.io>"]
+description = "Gosub browser using GTK"
+license = "MIT"
 
 [dependencies]
+gosub_engine = { version = "0.1.2", registry = "gosub" }
 gtk-macros = "0.3"
 gtk4 = { version = "0.9.5", features = ["v4_6", "v4_14"] }
 chrono = { version = "0.4.39", features = [] }
