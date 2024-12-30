@@ -6,18 +6,23 @@ use std::task::{Context, Poll};
 use futures_core::Stream as FStream;
 use bytes::Bytes;
 
+/// Default buffer size of our vec<u8> when we cannot determine the size of our stream. Seems a reasonable default.
 const DEFAULT_BUF_SIZE: usize = 1 * 1024;
 
-
+// This defines that a stream is a future_core stream that returns a result or Bytes. This is how we get
+// our data from the underlying library (reqwest in this case), but we want to work with vec<u8>.
 type Stream = dyn FStream<Item=anyhow::Result<Bytes>>;
 
-
-/// Converts the Error type (E) to an anyhow::Error (nothing more)
+/// This wrapper merely converts the Error type (E) from Future_core stream to an anyhow::Error. This
+/// is the error type that we use for our purposes.
 pub struct AsyncStreamWrap<S: FStream<Item=Result<Bytes, E>>, E: Error + Send + Sync + 'static>(S);
 
 impl <S: FStream<Item=Result<Bytes, E>>, E: Error + Send + Sync + 'static> FStream for AsyncStreamWrap<S, E> {
     type Item = anyhow::Result<Bytes>;
 
+    /// Poll next() is called to fetch the new poll. It will return either a Poll::Pending when there is no data (yet),
+    /// Poll::Ready() when there is data (or when the stream has ended). We just pass the data through, except when
+    /// there is an error. In that case, we convert that error into an anyhow::error, which is what we want our errors to be.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let stream =  unsafe { self.map_unchecked_mut(|this| &mut this.0) };
 
@@ -32,8 +37,8 @@ impl <S: FStream<Item=Result<Bytes, E>>, E: Error + Send + Sync + 'static> FStre
     }
 }
 
-
-///
+/// Defines an asynchroneous stream.
+/// Need to figure out the Pin and Box options
 pub struct AsyncStream {
     stream: Pin<Box<Stream>>,
     /// Optional length given to the stream. Can be None when the stream length is not known (beforehand)
@@ -41,52 +46,70 @@ pub struct AsyncStream {
 }
 
 impl AsyncStream {
-    pub fn to_vec(self) -> ToVec {
-        let (min_size, size) = self.stream.size_hint();
-        let size = size.or(self.len).unwrap_or(cmp::max(DEFAULT_BUF_SIZE, min_size));
-
-        let buf = Vec::with_capacity(size);
-
-        ToVec {
-            stream: self.stream,
-            buf,
-        }
-    }
-
+    /// Create a new Async stream.
     pub fn new<E: Error + Send + Sync + 'static>(stream: impl FStream<Item=Result<Bytes, E>> + 'static, len: Option<usize>) -> Self {
         Self {
             stream: Box::pin(AsyncStreamWrap(stream)),
             len,
         }
     }
+
+    /// Method to convert the stream (of bytes::Bytes) into a vec<u8>.
+    pub fn to_vec(self) -> ToVec {
+        // We try to determine the size of the stream (if possible), or use a default size if we can't
+        // detect this. This will set the capacity of our destination buffer.
+        let (min_size, size) = self.stream.size_hint();
+        let size = size.or(self.len).unwrap_or(cmp::max(DEFAULT_BUF_SIZE, min_size));
+
+        ToVec {
+            source_stream: self.stream,
+            dest_buf: Vec::with_capacity(size),
+        }
+    }
+
+    /// This function captures a whole stream and turns it into a Bytes::bytes
+    pub fn to_bytes(self) {
+
+    }
 }
 
-/// 
+/// This struct allows to return a stream of Bytes into a vec<u8>
 pub struct ToVec {
-    stream: Pin<Box<Stream>>,
-    buf: Vec<u8>, //TODO: this should be bytes and then in the end it can be copied to a single Vec<u8>
+    /// Actual stream that will be converted
+    source_stream: Pin<Box<Stream>>,
+    /// Destination buffer to store all the u8's we receive from the inner stream
+    dest_buf: Vec<u8>, //TODO: this should be bytes and then in the end it can be copied to a single Vec<u8>
 }
 
 impl Future for ToVec {
+    /// This future will output a Result<Vec<u8>>, or Result<None> when the stream is finished
     type Output = anyhow::Result<Vec<u8>>;
 
+    /// The poll() function will poll data from the inner stream (with bytes) and converts that data
+    /// to a vec<u8>.
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let stream = self.stream.as_mut();
+        let source_stream = self.source_stream.as_mut();
 
-        let poll = stream.poll_next(cx);
+        /// Fetch the next chunk of data
+        let poll = source_stream.poll_next(cx);
 
+        // When pending, we just return pending, indicating other things can be done while we are waiting for data (like network packets)
         let chunk = match poll {
             Poll::Pending => return Poll::Pending,
+            // A chunk of data is ready, or when chunk is None, the stream has ended
             Poll::Ready(chunk) => chunk,
         };
 
         match chunk {
-            Some(Ok(chunk)) => self.buf.extend_from_slice(&chunk.to_vec()),
+            // A chunk of data will be converted to vec<u8> and added to our destination buffer
+            Some(Ok(chunk)) => self.dest_buf.extend_from_slice(&chunk.to_vec()),
+            // An error has occurred, so we return an Ready with error
             Some(Err(e)) => return Poll::Ready(Err(e)),
-            None => return Poll::Ready(Ok(mem::take(&mut self.buf)))
+            /// No data found, so the stream is ready. We take our destination buffer and give it back to the caller
+            None => return Poll::Ready(Ok(mem::take(&mut self.dest_buf)))
         }
 
-
+        // Anything else means we are still pending data from the stream
         Poll::Pending
     }
 }
