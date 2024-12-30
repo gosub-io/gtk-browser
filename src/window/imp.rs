@@ -1,6 +1,6 @@
 use crate::engine::GosubEngineConfig;
 use crate::eventloop::WindowEventLoopDummy;
-use crate::tab::{GosubTab, GosubTabManager, TabCommand, TabId};
+use crate::tab::{GosubTab, GosubTabManager, HtmlViewMode, TabCommand, TabId};
 use crate::window::message::Message;
 use crate::window::tab_context_menu::{build_context_menu, setup_context_menu_actions, TabInfo};
 use crate::{fetcher, runtime};
@@ -13,16 +13,15 @@ use gtk4::glib::Quark;
 use gtk4::graphene::Point;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{
-    gdk, glib, Button, CompositeTemplate, DrawingArea, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow,
-    Settings, TemplateChild, TextView, ToggleButton, Widget,
-};
+use gtk4::{gdk, glib, Button, CompositeTemplate, DrawingArea, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
 use log::info;
 use once_cell::sync::Lazy;
 use reqwest::Url;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
+use sourceview5::prelude::*;
+use sourceview5::{LanguageManager, View};
 
 // Create a static Quark as a unique key
 static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
@@ -168,8 +167,8 @@ impl BrowserWindow {
                 let tab_id = page.get_tab_id().unwrap();
 
                 let binding = entry.text();
-                if binding.starts_with("about:") {
-                    // About: pages are special, we don't need to prefix them with a protocol
+                if binding.starts_with("about:") || binding.starts_with("source:") {
+                    // About: and source: pages are special, we don't need to prefix them with a protocol
                     self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
                 } else if binding.starts_with("http://") || binding.starts_with("https://") {
                     // https:// and http:// protocols are loaded as-is
@@ -273,7 +272,35 @@ impl BrowserWindow {
                         .vexpand(true)
                         .build();
 
-                    if tab.has_drawer() {
+
+                    if tab.viewmode() == HtmlViewMode::Source {
+                        // @todo: we should be able to do things like json as well. See:
+                        // https://github.com/danirod/cartero/blob/4c3a356ccb04be272123126354b91ef707fb7d0e/src/widgets/response_panel.rs#L254C9-L268C19
+                        let lang = LanguageManager::default().language("json");
+                        let buf = sourceview5::Buffer::builder()
+                            .text(tab.content())
+                            .highlight_syntax(true)
+                            .highlight_matching_brackets(true)
+                            .build();
+
+                        match lang {
+                            Some(lang) => {
+                                buf.set_language(Some(&lang));
+                            }
+                            None => {
+                                buf.set_language(None);
+                            }
+                        }
+
+                        let view = View::new();
+                        view.set_editable(false);
+                        view.set_show_line_marks(true);
+                        view.set_show_line_numbers(true);
+                        view.set_auto_indent(true);
+                        view.set_cursor_visible(false);
+                        view.set_buffer(Some(&buf));
+                        scrolled_window.set_child(Some(&view));
+                    } else if tab.has_drawer() {
                         let tab_clone = tab.clone();
 
                         let area = DrawingArea::default();
@@ -486,14 +513,19 @@ impl BrowserWindow {
     fn load_url_async(&self, tab_id: TabId) {
         let manager = self.tab_manager.lock().unwrap();
         let tab = manager.get_tab(tab_id).unwrap();
-        let url = tab.url().to_string();
+        let mut url = tab.url().to_string();
+        let mut view_mode = HtmlViewMode::Rendered;
         drop(manager);
 
         let sender_clone = self.get_sender().clone();
         runtime().spawn(async move {
+            if url.starts_with("source:") {
+                url = url.replace("source:", "");
+                view_mode = HtmlViewMode::Source;
+            }
             if url.starts_with("about:") {
                 let html_content = load_about_url(url);
-                sender_clone.send(Message::UrlLoaded(tab_id, html_content)).await.unwrap();
+                sender_clone.send(Message::UrlLoaded(tab_id, html_content, HtmlViewMode::Rendered)).await.unwrap();
                 return;
             }
 
@@ -502,7 +534,7 @@ impl BrowserWindow {
                     let html_content = String::from_utf8_lossy(content.as_slice());
                     // we get a Cow.. and we clone it into the url?
                     sender_clone
-                        .send(Message::UrlLoaded(tab_id, html_content.to_string()))
+                        .send(Message::UrlLoaded(tab_id, html_content.to_string(), view_mode))
                         .await
                         .unwrap();
                 }
@@ -587,7 +619,7 @@ impl BrowserWindow {
 
                 self.refresh_tabs();
             }
-            Message::UrlLoaded(tab_id, html_content) => {
+            Message::UrlLoaded(tab_id, html_content, viewmode) => {
                 let mut manager = self.tab_manager.lock().unwrap();
                 let mut tab = manager.get_tab(tab_id).unwrap().clone();
                 tab.set_content(&html_content);
@@ -595,6 +627,7 @@ impl BrowserWindow {
                 let url = Url::from_str(tab.url()).unwrap();
                 let d = <GosubEngineConfig as HasTreeDrawer>::TreeDrawer::from_source(url, &html_content, TaffyLayouter, false).unwrap();
                 tab.set_drawer(d);
+                tab.set_viewmode(viewmode);
 
                 // Fetch title from HTML content... poorly..
                 if let Some(title) = fetch_title_from_html(&html_content) {

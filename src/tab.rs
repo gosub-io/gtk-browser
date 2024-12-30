@@ -42,8 +42,17 @@ impl fmt::Display for TabId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HtmlViewMode {
+    /// View the HTML as syntax highlighted source
+    Source,
+    /// View the HTML as rendered
+    Rendered,
+}
+
 #[derive(Clone)]
 pub struct GosubTab {
+    view_mode: HtmlViewMode,
     /// Tab is currently loading
     loading: bool,
     /// Id of the tab
@@ -78,6 +87,7 @@ impl Debug for GosubTab {
 impl GosubTab {
     pub fn new(url: &str, title: &str) -> Self {
         GosubTab {
+            view_mode: HtmlViewMode::Rendered,
             loading: false,
             id: TabId::new(),
             pinned: false,
@@ -89,6 +99,13 @@ impl GosubTab {
             content: String::new(),
             drawer: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub(crate) fn set_viewmode(&mut self, mode: HtmlViewMode) {
+        self.view_mode = mode;
+    }
+    pub(crate) fn viewmode(&self) -> HtmlViewMode {
+        self.view_mode
     }
 
     pub fn has_drawer(&self) -> bool {

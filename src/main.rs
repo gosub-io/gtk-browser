@@ -24,6 +24,9 @@ fn runtime() -> &'static Runtime {
 fn main() {
     colog::init();
 
+    gtk4::init().unwrap();
+    sourceview5::init();
+
     gio::resources_register_include!("gosub.gresource").expect("Failed to register resources.");
 
     let app = Application::new();

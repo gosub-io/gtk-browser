@@ -139,6 +139,7 @@ impl Application {
 
     pub fn run(&self) {
         info!("Application started");
+        sourceview5::init();
         ApplicationExtManual::run(self);
     }
 }
