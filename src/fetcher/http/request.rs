@@ -3,7 +3,7 @@ use url::Url;
 use crate::fetcher::http::http::{HttpBody, HttpMethod};
 
 /// Gosub HTTP Request
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct HttpRequest {
     /// Method of the request (GET, POST, PUT, DELETE, etc)
     pub method: HttpMethod,
@@ -95,6 +95,5 @@ mod test {
         assert_eq!(request.headers.get("Content-Type"), Some(&"application/json".to_string()));
         assert_eq!(request.cookies.len(), 1);
         assert_eq!(request.cookies.get("session"), Some(&"123456".to_string()));
-        assert_eq!(request.body, HttpBody::Empty);
     }
 }

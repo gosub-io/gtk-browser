@@ -1,16 +1,18 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use log::info;
-use reqwest::header::HeaderMap;
+use reqwest::header::{HeaderMap, HeaderName};
 use reqwest::{Method, Version};
 use crate::cookies::jar::CookieJar;
 use crate::cookies::sqlite_store::SqliteStorage;
+use crate::fetcher::async_stream::{AsyncStream};
 use crate::fetcher::http::agents::HttpRequestAgent;
 use crate::fetcher::http::http::{HttpBody, GOSUB_USERAGENT_STRING};
 use crate::fetcher::http::HttpError;
 use crate::fetcher::http::request::HttpRequest;
 use crate::fetcher::http::response::{HttpResponse, HttpVersion, ResponseHeader};
 use crate::fetcher::HttpMethod;
+use std::str::FromStr;
 
 /// Http agent that uses reqwest library to make HTTP requests
 pub struct ReqwestAgent {
@@ -70,7 +72,7 @@ impl HttpRequestAgent for ReqwestAgent {
         headers.insert("DNT", "1".parse().unwrap());
 
         for (key, value) in req.headers {
-            headers.insert(key.into(), value.parse().unwrap());
+            headers.insert(HeaderName::from_str(&key).unwrap(), value.parse().unwrap());
         }
 
         // Cookies are automatically added through the CookieJar we defined in the constructor
@@ -91,25 +93,22 @@ impl HttpRequestAgent for ReqwestAgent {
                     req.url.clone(),
                 );
 
+
                 // Check if we have a content length, if so, we can decide if we want to read the
                 // body as a whole (if small enough), or we need to stream it
                 let body = match response.content_length() { //TODO: it might not be correct to decide on the content length what to do
                     Some(len) => {
                         if len == 0 {
-                            // Length is explicitly 0, so we can assume there isn't a body found
+                            // Length is explicitly 0, we assume there isn't a body found
                             HttpBody::Empty
-                        } else if len < 1024 {
-                            // Length is small enough to read the whole body
-                            HttpBody::Bytes(response.bytes().await.map_err(|e| HttpError::AgentError(Box::new(e)) )?.to_vec())
                         } else {
-                            // Length is too big to read the whole body. We use a stream instead
-                            HttpBody::Reader(Box::new(response.bytes().await.map_err(|e| HttpError::AgentError(Box::new(e)) )?))
+                            HttpBody::Reader(AsyncStream::new(response.bytes_stream(), Some(len as usize)))
                         }
                     }
                     None => {
                         // No information is present about the body, we return a streaming body as default
                         info!("no content length given. Assume streaming");
-                        HttpBody::Reader(Box::new(response.bytes().await.map_err(|e| HttpError::AgentError(Box::new(e)) )?))
+                        HttpBody::Reader(AsyncStream::new(response.bytes_stream(), None))
                     }
                 };
 

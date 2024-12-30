@@ -1,15 +1,29 @@
-use std::io::Read;
+use std::fmt::Debug;
+use crate::fetcher::async_stream::AsyncStream;
 
 pub const GOSUB_USERAGENT_STRING: &str = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; Wayland; rv:133.0) Gecko/20100101 Gosub/0.1 Firefox/133.0";
 
-#[derive(Debug, Clone, PartialEq)]
 pub enum HttpBody {
-    /// A chunk of bytes in memory
-    Bytes(Vec<u8>),
     /// A reader that can stream data (e.g. file, network)
-    Reader(Box<dyn Read + Send + 'static>),
-    /// No body given
+    Reader(AsyncStream),
+    /// Body is empty
     Empty,
+}
+
+
+impl Clone for HttpBody {
+    fn clone(&self) -> Self {
+        Self::Empty
+    }
+}
+
+impl Debug for HttpBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HttpBody::Reader(_) => write!(f, "HttpBody::Reader"),
+            HttpBody::Empty => write!(f, "HttpBody::Empty"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

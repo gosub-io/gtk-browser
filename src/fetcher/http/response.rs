@@ -124,6 +124,5 @@ mod test {
         assert_eq!(response.head().version, HttpVersion::Http11);
         assert_eq!(response.head().status_code, 200);
         assert_eq!(response.head().url.as_str(), "https://example.com");
-        assert_eq!(response.body(), &HttpBody::Empty);
     }
 }

@@ -10,7 +10,7 @@ mod http;
 
 #[cfg(feature = "proto-gopher")]
 mod gopher;
-
+mod async_stream;
 
 #[derive(Error, Debug)]
 pub enum FetcherError {
