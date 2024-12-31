@@ -1,5 +1,5 @@
-use gosub_engine::prelude::ModuleConfiguration;
 use url::Url;
+use crate::fetcher::gopher::GopherError;
 
 pub struct GopherRequest {
     url: Url,
@@ -28,6 +28,7 @@ impl GopherFetcher {
         }
     }
 
-    pub async fn fetch(&self, request: GopherRequest) -> Result<GopherResponse, Self::Error> {
+    pub async fn fetch(&self, _request: GopherRequest) -> Result<GopherResponse, GopherError> {
+        Ok(GopherResponse {})
     }
 }

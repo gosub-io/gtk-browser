@@ -3,9 +3,10 @@ mod cookies;
 mod dialog;
 pub mod engine;
 mod eventloop;
-mod fetcher;
 mod tab;
 mod window;
+#[allow(dead_code)]
+mod fetcher;
 
 use crate::application::Application;
 use gtk4::gdk::Display;

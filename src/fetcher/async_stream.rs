@@ -90,7 +90,7 @@ impl Future for ToVec {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let source_stream = self.source_stream.as_mut();
 
-        /// Fetch the next chunk of data
+        // Fetch the next chunk of data
         let poll = source_stream.poll_next(cx);
 
         // When pending, we just return pending, indicating other things can be done while we are waiting for data (like network packets)
@@ -105,7 +105,7 @@ impl Future for ToVec {
             Some(Ok(chunk)) => self.dest_buf.extend_from_slice(&chunk.to_vec()),
             // An error has occurred, so we return an Ready with error
             Some(Err(e)) => return Poll::Ready(Err(e)),
-            /// No data found, so the stream is ready. We take our destination buffer and give it back to the caller
+            // No data found, so the stream is ready. We take our destination buffer and give it back to the caller
             None => return Poll::Ready(Ok(mem::take(&mut self.dest_buf)))
         }
 

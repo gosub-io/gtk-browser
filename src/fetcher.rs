@@ -1,4 +1,4 @@
-use log::error;
+use log::{error, info};
 use url::Url;
 use thiserror::Error;
 
@@ -61,6 +61,23 @@ struct Fetcher {
 }
 
 impl Fetcher {
+    fn protocols_implemented() -> Vec<String> {
+        let mut protocols = vec![];
+
+        #[cfg(feature = "proto-http")]
+        protocols.push("http".to_string());
+        #[cfg(feature = "proto-ftp")]
+        protocols.push("ftp".to_string());
+        // #[cfg(feature = "proto-file")]
+        // protocols.push("file".to_string());
+        // #[cfg(feature = "proto-irc")]
+        // protocols.push("irc".to_string());
+        #[cfg(feature = "proto-gopher")]
+        protocols.push("gopher".to_string());
+
+        protocols
+    }
+
     async fn fetch(&self, url: Url) -> Result<Response, FetcherError> {
         let scheme = url.scheme();
 
@@ -87,7 +104,10 @@ impl Fetcher {
             #[cfg(feature = "proto-gopher")]
             "gopher" => {
                 let request = GopherRequest::new(url);
-                self.gopher_fetcher.fetch(request)
+                match self.gopher_fetcher.fetch(request).await {
+                    Ok(response) => Ok(Response::Gopher(response)),
+                    Err(e) => Err(FetcherError::Gopher(e)),
+                }
             }
             _ => {
                 error!("Unsupported scheme: {}", scheme);
@@ -98,6 +118,7 @@ impl Fetcher {
 }
 
 pub async fn fetch_favicon(_url: &str) -> Vec<u8> {
+    info!("Fetcher protocols implemented: {:?}",  Fetcher::protocols_implemented());
     Vec::new()
 }
 
