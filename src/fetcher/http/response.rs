@@ -101,8 +101,8 @@ impl HttpResponse {
         &self.header
     }
 
-    pub fn body(&self) -> &HttpBody {
-        &self.body
+    pub fn body(self) -> HttpBody {
+        self.body
     }
 }
 

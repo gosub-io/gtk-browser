@@ -1700,6 +1700,7 @@ dependencies = [
  "chrono",
  "colog",
  "cookie",
+ "futures",
  "futures-core",
  "glib-build-tools",
  "gosub_engine",

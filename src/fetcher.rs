@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::error;
 use url::Url;
 use thiserror::Error;
 
@@ -28,7 +28,7 @@ pub enum FetcherError {
     #[cfg(feature = "proto-gopher")]
     #[error("gopher error: {0}")]
     Gopher(#[from] gopher::GopherError),
-    
+
     #[error("unsupported scheme")]
     UnsupportedScheme
 }
@@ -55,6 +55,7 @@ pub use crate::fetcher::gopher::{
     fetcher::GopherRequest,
     fetcher::GopherResponse
 };
+use crate::fetcher::http::http::HttpBody;
 
 enum Response {
     #[cfg(feature = "proto-http")]
@@ -94,6 +95,17 @@ impl Fetcher {
         protocols.push("gopher".to_string());
 
         protocols
+    }
+
+    pub fn new(base_url: Url) -> Self {
+        Fetcher {
+            #[cfg(feature = "proto-http")]
+            http_fetcher: CompleteHttpFetcher::new(base_url.clone()),
+            #[cfg(feature = "proto-ftp")]
+            ftp_fetcher: FtpFetcher::new(base_url.clone()),
+            #[cfg(feature = "proto-gopher")]
+            gopher_fetcher: GopherFetcher::new(base_url.clone()),
+        }
     }
 
     async fn fetch(&self, url: Url) -> Result<Response, FetcherError> {
@@ -138,9 +150,41 @@ impl Fetcher {
     }
 }
 
-pub async fn fetch_favicon(_url: &str) -> Vec<u8> {
-    info!("Fetcher protocols implemented: {:?}",  Fetcher::protocols_implemented());
-    Vec::new()
+pub async fn fetch_favicon(url: &str) -> Vec<u8> {
+    let Ok(url) = Url::parse(url) else {
+        return Vec::new();
+    };
+
+    let fetcher = Fetcher::new(url.clone());
+    match fetcher.fetch(url).await {
+        Ok(response) => {
+            match response {
+                Response::Http(http_response) => {
+                    if http_response.head().status_code() == 200 {
+                        match http_response.body() {
+                            HttpBody::Reader(reader) => {
+                                match reader.to_vec().await {
+                                    Ok(data) => data,
+                                    Err(e) => {
+                                        error!("Failed to fetch favicon from URL: {:?}", e);
+                                        Vec::new()
+                                    }
+                                }
+                            }
+                            HttpBody::Empty => Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    }
+                }
+                _ => Vec::new()
+            }
+        }
+        Err(e) => {
+            error!("Failed to fetch favicon from URL: {:?}", e);
+            Vec::new()
+        }
+    }
 }
 
 pub async fn fetch_url_body(_url: &str) -> Result<Vec<u8>, FetcherError> {

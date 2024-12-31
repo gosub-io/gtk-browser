@@ -11,13 +11,18 @@ const DEFAULT_BUF_SIZE: usize = 1 * 1024;
 
 // This defines that a stream is a future_core stream that returns a result or Bytes. This is how we get
 // our data from the underlying library (reqwest in this case), but we want to work with vec<u8>.
-type Stream = dyn FStream<Item=anyhow::Result<Bytes>>;
+// type Stream = dyn FStream<Item=anyhow::Result<Bytes>>;
+type Stream = Pin<Box<dyn FStream<Item = anyhow::Result<Bytes>> + Send>>;
 
 /// This wrapper merely converts the Error type (E) from Future_core stream to an anyhow::Error. This
 /// is the error type that we use for our purposes.
-pub struct AsyncStreamWrap<S: FStream<Item=Result<Bytes, E>>, E: Error + Send + Sync + 'static>(S);
+pub struct AsyncStreamWrap<S: FStream<Item=Result<Bytes, E>> + Send, E: Error + Send + Sync + 'static>(S);
 
-impl <S: FStream<Item=Result<Bytes, E>>, E: Error + Send + Sync + 'static> FStream for AsyncStreamWrap<S, E> {
+impl <S, E> FStream for AsyncStreamWrap<S, E>
+where
+    S: FStream<Item=Result<Bytes, E>> + Send,
+    E: Error + Send + Sync + 'static,
+{
     type Item = anyhow::Result<Bytes>;
 
     /// Poll next() is called to fetch the new poll. It will return either a Poll::Pending when there is no data (yet),
@@ -28,7 +33,9 @@ impl <S: FStream<Item=Result<Bytes, E>>, E: Error + Send + Sync + 'static> FStre
 
         match stream.poll_next(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(val) => Poll::Ready(val.map(|v| v.map_err(|e| anyhow::Error::new(e)))),
+            Poll::Ready(Some(Ok(bytes))) => Poll::Ready(Some(Ok(bytes))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(anyhow::Error::new(e)))),
+            Poll::Ready(None) => Poll::Ready(None),
         }
     }
 
@@ -37,17 +44,31 @@ impl <S: FStream<Item=Result<Bytes, E>>, E: Error + Send + Sync + 'static> FStre
     }
 }
 
-/// Defines an asynchroneous stream.
-/// Need to figure out the Pin and Box options
+/// Allows to clone the async stream wrapper
+impl<S, E> Clone for AsyncStreamWrap<S, E>
+where
+    S: FStream<Item = Result<Bytes, E>> + Clone + Send,
+    E: Error + Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        AsyncStreamWrap(self.0.clone())
+    }
+}
+
+/// Defines an asynchronous stream.
 pub struct AsyncStream {
-    stream: Pin<Box<Stream>>,
+    stream: Pin<Box<dyn FStream<Item = anyhow::Result<Bytes>> + Send>>,
     /// Optional length given to the stream. Can be None when the stream length is not known (beforehand)
     len: Option<usize>,
 }
 
 impl AsyncStream {
     /// Create a new Async stream.
-    pub fn new<E: Error + Send + Sync + 'static>(stream: impl FStream<Item=Result<Bytes, E>> + 'static, len: Option<usize>) -> Self {
+    pub fn new<E, S>(stream: S, len: Option<usize>) -> Self
+    where
+        E: Error + Send + Sync + 'static,
+        S: FStream<Item = Result<Bytes, E>> + Send + 'static,
+    {
         Self {
             stream: Box::pin(AsyncStreamWrap(stream)),
             len,
@@ -68,15 +89,19 @@ impl AsyncStream {
     }
 
     /// This function captures a whole stream and turns it into a Bytes::bytes
-    pub fn to_bytes(self) {
-
+    pub fn to_bytes(self) -> impl Future<Output = anyhow::Result<Bytes>> {
+        let to_vec = self.to_vec();
+        async move {
+            let vec = to_vec.await?;
+            Ok(Bytes::from(vec))
+        }
     }
 }
 
 /// This struct allows to return a stream of Bytes into a vec<u8>
 pub struct ToVec {
     /// Actual stream that will be converted
-    source_stream: Pin<Box<Stream>>,
+    source_stream: Stream,
     /// Destination buffer to store all the u8's we receive from the inner stream
     dest_buf: Vec<u8>, //TODO: this should be bytes and then in the end it can be copied to a single Vec<u8>
 }
@@ -111,5 +136,28 @@ impl Future for ToVec {
 
         // Anything else means we are still pending data from the stream
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+    use bytes::Bytes;
+
+    #[tokio::test]
+    async fn test_async_stream_wrap() {
+        let data = vec![Ok(Bytes::from("hello")), Ok(Bytes::from("world"))];
+        let mock_stream = stream::iter(data);
+        let wrapped = AsyncStreamWrap(mock_stream);
+
+        let mut pinned = Box::pin(wrapped);
+        let mut result = Vec::new();
+
+        while let Some(item) = pinned.next().await {
+            result.extend_from_slice(&item.unwrap());
+        }
+
+        assert_eq!(result, b"helloworld");
     }
 }

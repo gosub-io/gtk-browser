@@ -36,11 +36,11 @@ impl HttpRequestAgent for ReqwestAgent {
         // Cookies should be dealt with more flexible
         let jar = match SqliteStorage::new("./gosub_cookies.db") {
             Ok(store) => {
-                info!("successfully created SqliteStorage");
+                info!(target: "fetcher", "successfully created SqliteStorage");
                 Some(CookieJar::new(Arc::new(Mutex::new(store))))
             }
             Err(e) => {
-                info!("failed to create SqliteStorage: {:?}", e);
+                info!(target: "fetcher", "failed to create SqliteStorage: {:?}", e);
                 None
             }
         };
@@ -50,7 +50,7 @@ impl HttpRequestAgent for ReqwestAgent {
                 builder = builder.cookie_provider(Arc::new(jar));
             }
             None => {
-                info!("no cookie jar");
+                info!(target: "fetcher", "no cookie jar");
             }
         }
 
@@ -60,7 +60,7 @@ impl HttpRequestAgent for ReqwestAgent {
     }
 
     async fn execute(&self, req: HttpRequest) -> Result<HttpResponse, HttpError> {
-        info!("executing request via Reqwest: {:?}", req);
+        println!("executing request via Reqwest: {:?}", req);
 
         // Additional headers we like to add, besides the ones given in the request
         let mut headers = HeaderMap::new();
@@ -109,16 +109,16 @@ impl HttpRequestAgent for ReqwestAgent {
                     }
                     None => {
                         // No information is present about the body, we return a streaming body as default
-                        info!("no content length given. Assume streaming");
+                        info!(target: "fetcher", "no content length given. Assume streaming");
                         HttpBody::Reader(AsyncStream::new(response.bytes_stream(), None))
                     }
                 };
 
-                info!("response: {:?}", res_header);
+                info!(target: "fetcher", "response: {:?}", res_header);
                 Ok(HttpResponse::new(res_header, body))
             }
             Err(e) => {
-                info!("error: {:?}", e);
+                info!(target: "fetcher", "error: {:?}", e);
 
                 Err(HttpError::AgentError(Box::new(e))) //TODO: we need to map the actual errors to the `HttpError`
             }

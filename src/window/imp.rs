@@ -143,7 +143,7 @@ impl BrowserWindow {
     fn handle_toggle_darkmode(&self, btn: &ToggleButton) {
         self.log("Toggling dark mode");
 
-        info!("Toggle dark mode action triggered");
+        info!(target: "gtk", "Toggle dark mode action triggered");
         let settings = Settings::default().expect("Failed to get default GtkSettings");
         settings.set_property("gtk-application-prefer-dark-theme", btn.is_active());
     }
@@ -165,31 +165,57 @@ impl BrowserWindow {
                 self.log(format!("Visiting the URL {}", entry.text().as_str()).as_str());
 
                 let tab_id = page.get_tab_id().unwrap();
+                let url_str = entry.text().to_string();
 
-                let binding = entry.text();
-                if binding.starts_with("about:") || binding.starts_with("source:") {
-                    // About: and source: pages are special, we don't need to prefix them with a protocol
-                    self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
-                } else if binding.starts_with("http://") || binding.starts_with("https://") {
-                    // https:// and http:// protocols are loaded as-is
-                    self.sender.send(Message::LoadUrl(tab_id, binding.to_string())).await.unwrap();
-                } else {
-                    // No protocol, we use https:// as a prefix
-                    let url = format!("https://{}", binding);
-                    self.sender.send(Message::LoadUrl(tab_id, url)).await.unwrap();
-                }
+                self.sender.send(Message::LoadUrl(tab_id, url_str)).await.unwrap();
             }
             None => {
                 self.log("No active tab to load the URL");
             }
         }
     }
+
+    fn sanitize_url(&self, url_str: &str) -> (HtmlViewMode, String) {
+        let mut view_mode = HtmlViewMode::Rendered;
+        let mut url = url_str.to_string();
+
+        if url.starts_with("source:") {
+            view_mode = HtmlViewMode::Source;
+            url = url.replace("source:", "");
+        }
+        if url.starts_with("raw:") {
+            view_mode = HtmlViewMode::RawSource;
+            url = url.replace("raw:", "");
+        }
+        if url.starts_with("json:") {
+            view_mode = HtmlViewMode::Json;
+            url = url.replace("json:", "");
+        }
+        if url.starts_with("xml:") {
+            view_mode = HtmlViewMode::Xml;
+            url = url.replace("xml:", "");
+        }
+
+        // Make sure the url starts with a proper scheme or about:. If no scheme is present, we assume https://
+        if url.starts_with("about:") {
+            // About: pages are special, we don't need to prefix them with a protocol, and are always renderered
+            view_mode = HtmlViewMode::Rendered;
+
+        } else if url.starts_with("http://") || url.starts_with("https://") {
+            // URL already has a scheme, we don't need to do anything
+        } else {
+            // No scheme, we use https:// as a prefix
+            url = format!("https://{}", url);
+        }
+
+        (view_mode, url)
+    }
 }
 
 impl BrowserWindow {
     pub fn log(&self, message: &str) {
         let s = format!("[{}] {}\n", chrono::Local::now().format("%X"), message);
-        info!("{}", s.as_str());
+        info!(target: "ftk", "Logmessage: {}", s.as_str());
 
         let buf = self.log.buffer();
         let mut iter = buf.end_iter();
@@ -271,7 +297,6 @@ impl BrowserWindow {
                         .vscrollbar_policy(gtk4::PolicyType::Automatic)
                         .vexpand(true)
                         .build();
-
 
                     if tab.viewmode() == HtmlViewMode::Source {
                         // @todo: we should be able to do things like json as well. See:
@@ -404,7 +429,7 @@ impl BrowserWindow {
         let window_clone = self.obj().clone();
         let tab_id = tab.id();
         tab_close_button.connect_clicked(move |_| {
-            info!("Clicked close button for tab {}", tab_id);
+            info!(target: "gtk", "Clicked close button for tab {}", tab_id);
             window_clone.imp().close_tab(tab_id);
             _ = window_clone.imp().get_sender().send_blocking(Message::RefreshTabs());
         });
@@ -491,7 +516,7 @@ impl BrowserWindow {
     }
 
     fn load_favicon_async(&self, tab_id: TabId) {
-        info!("Fetching favicon for tab: {}", tab_id);
+        info!(target: "gtk", "Fetching favicon for tab: {}", tab_id);
 
         let manager = self.tab_manager.lock().unwrap();
         let tab = manager.get_tab(tab_id).unwrap();
@@ -551,27 +576,32 @@ impl BrowserWindow {
 
     /// Handles all message coming from the async (tokio) tasks
     pub async fn handle_message(&self, message: Message) {
-        info!("Received a message: {:?}", message);
+        info!(target: "gtk", "Received a message: {:?}", message);
 
         match message {
             Message::RefreshTabs() => {
                 self.refresh_tabs();
             }
             Message::OpenTab(url, title) => {
-                self.open_tab(None, url, title);
+                self.open_tab(None, &url, &title);
             }
             Message::OpenTabRight(target_tab_id, url, title) => {
                 for page_num in 0..self.tab_bar.pages().n_items() {
                     let page = self.tab_bar.nth_page(Some(page_num)).unwrap();
                     if page.get_tab_id().unwrap() == target_tab_id {
-                        self.open_tab(Some(page_num as usize + 1), url, title);
+                        self.open_tab(Some(page_num as usize + 1), &url, &title);
                         return;
                     }
                 }
             }
 
-            Message::LoadUrl(tab_id, url) => {
-                self.log(format!("Loading URL: {}", url).as_str());
+            Message::LoadUrl(tab_id, url_str) => {
+                self.log(format!("Loading URL: {}", url_str).as_str());
+
+                // Make sure the URL is correct (starts with scheme://, and find the view_mode (source: xml: raw: etc)
+                let (view_mode, url) = self.sanitize_url(&url_str);
+                dbg!(&view_mode);
+                dbg!(&url);
 
                 // Update information in the given tab with the new url
                 let mut manager = self.tab_manager.lock().unwrap();
@@ -581,6 +611,7 @@ impl BrowserWindow {
                 tab.set_title(url.as_str());
                 tab.set_url(url.as_str());
                 tab.set_loading(true);
+                tab.set_viewmode(view_mode);
 
                 manager.update_tab(tab_id, &tab);
                 drop(manager);
@@ -679,13 +710,18 @@ impl BrowserWindow {
 
     /// Opens a new tab at the given position, with the given URL and title. If the position is None,
     /// the tab will be added at the end of the tab-bar.
-    fn open_tab(&self, position: Option<usize>, url: String, title: String) {
-        let mut tab = GosubTab::new(url.as_str(), title.as_str());
+    fn open_tab(&self, position: Option<usize>, url_str: &str, title: &str) {
+        let (view_mode, url) = self.sanitize_url(&url_str);
+        dbg!(&view_mode);
+        dbg!(&url_str);
+
+        let mut tab = GosubTab::new(&url, title);
         let tab_id = tab.id();
 
         // add tab to manager, and notify the tab has changed. This will update the
         // tab-bar during a refresh-tabs call.
         let mut manager = self.tab_manager.lock().unwrap();
+        tab.set_viewmode(view_mode);
         tab.set_loading(true);
         manager.add_tab(tab, position);
         manager.notify_tab_changed(tab_id);

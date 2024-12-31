@@ -44,10 +44,16 @@ impl fmt::Display for TabId {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HtmlViewMode {
-    /// View the HTML as syntax highlighted source
-    Source,
     /// View the HTML as rendered
     Rendered,
+    /// View the HTML as syntax highlighted source
+    Source,
+    /// Viewed as raw incoming data without indenting or highlighting
+    RawSource,
+    /// View as XML file
+    Xml,
+    /// View as JSON file
+    Json,
 }
 
 #[derive(Clone)]

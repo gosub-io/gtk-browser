@@ -24,7 +24,18 @@ fn runtime() -> &'static Runtime {
 }
 
 fn main() {
-    colog::init();
+    colog::basic_builder()
+        .format_file(true)
+        .format_indent(Some(2))
+        .format_level(true)
+        .format_suffix(" ")
+        .format_module_path(true)
+        .format_source_path(true)
+        .format_target(true)
+        .filter(None, log::LevelFilter::Error)
+        .filter(Some("fetcher"), log::LevelFilter::Trace)
+        .filter(Some("gtk"), log::LevelFilter::Info)
+        .init();
 
     Fetcher::protocols_implemented().iter().for_each(|protocol| {
         println!("Protocol: {}", protocol);
