@@ -7,19 +7,28 @@ compile_error!("Feature 'proto-http' cannot be disabled.");
 
 #[cfg(feature = "proto-http")]
 mod http;
-
+#[cfg(feature = "proto-ftp")]
+mod ftp;
 #[cfg(feature = "proto-gopher")]
 mod gopher;
+
 mod async_stream;
+
 
 #[derive(Error, Debug)]
 pub enum FetcherError {
     #[cfg(feature = "proto-http")]
     #[error("http error: {0}")]
     Http(#[from] http::HttpError),
+
+    #[cfg(feature = "proto-ftp")]
+    #[error("ftp error: {0}")]
+    Ftp(#[from] ftp::FtpError),
+
     #[cfg(feature = "proto-gopher")]
     #[error("gopher error: {0}")]
     Gopher(#[from] gopher::GopherError),
+    
     #[error("unsupported scheme")]
     UnsupportedScheme
 }
@@ -27,10 +36,17 @@ pub enum FetcherError {
 
 #[cfg(feature = "proto-http")]
 pub use crate::fetcher::http::{
-    HttpFetcher,
+    CompleteHttpFetcher,
     response::HttpResponse,
     request::HttpRequest,
     http::HttpMethod,
+};
+
+#[cfg(feature = "proto-ftp")]
+pub use crate::fetcher::ftp::{
+    fetcher::FtpFetcher,
+    fetcher::FtpRequest,
+    fetcher::FtpResponse
 };
 
 #[cfg(feature = "proto-gopher")]
@@ -43,25 +59,27 @@ pub use crate::fetcher::gopher::{
 enum Response {
     #[cfg(feature = "proto-http")]
     Http(HttpResponse),
+    #[cfg(feature = "proto-ftp")]
+    Ftp(FtpResponse),
     #[cfg(feature = "proto-gopher")]
     Gopher(GopherResponse),
-    // #[cfg(feature = "proto-ftp")]
-    // Ftp(FtpResponse),
     // #[cfg(feature = "proto-file")]
     // File(FileResponse),
     // #[cfg(feature = "proto-irc")]
     // Irc(IrcResponse),
 }
 
-struct Fetcher {
+pub struct Fetcher {
     #[cfg(feature = "proto-http")]
-    http_fetcher: HttpFetcher,
+    http_fetcher: CompleteHttpFetcher,  // This is the fetcher with the compiled request agent (ie: HttpAgent<ReqwestAgent>)
+    #[cfg(feature = "proto-ftp")]
+    ftp_fetcher: FtpFetcher,
     #[cfg(feature = "proto-gopher")]
     gopher_fetcher: GopherFetcher,
 }
 
 impl Fetcher {
-    fn protocols_implemented() -> Vec<String> {
+    pub fn protocols_implemented() -> Vec<String> {
         let mut protocols = vec![];
 
         #[cfg(feature = "proto-http")]
@@ -92,8 +110,11 @@ impl Fetcher {
             }
             #[cfg(feature = "proto-ftp")]
             "ftp" => {
-                // let request = FtpRequest::new(FtpMethod::Get, url);
-                // self.ftp_fetcher.fetch(request)
+                let request = FtpRequest::new(url);
+                match self.ftp_fetcher.fetch(request).await {
+                    Ok(response) => Ok(Response::Ftp(response)),
+                    Err(e) => Err(FetcherError::Ftp(e)),
+                }
             }
             // "file" => {
             //     self.file_fetcher.fetch(url)

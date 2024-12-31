@@ -35,6 +35,7 @@ impl Display for HttpVersion {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ResponseHeader {
     /// Http version (1.0, 1.1, 2.0)
     version: HttpVersion,

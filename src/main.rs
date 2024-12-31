@@ -14,6 +14,7 @@ use gtk4::prelude::ApplicationExt;
 use gtk4::{gio, CssProvider};
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
+use crate::fetcher::Fetcher;
 
 const APP_ID: &str = "io.gosub.browser-gtk";
 
@@ -24,6 +25,10 @@ fn runtime() -> &'static Runtime {
 
 fn main() {
     colog::init();
+
+    Fetcher::protocols_implemented().iter().for_each(|protocol| {
+        println!("Protocol: {}", protocol);
+    });
 
     gtk4::init().unwrap();
     sourceview5::init();

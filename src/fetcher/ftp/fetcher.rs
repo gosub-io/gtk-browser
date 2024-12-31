@@ -1,17 +1,34 @@
-use gosub_engine::prelude::ModuleConfiguration;
 use url::Url;
+use crate::fetcher::ftp::FtpError;
 
-struct FtpFetcher {
+pub struct FtpRequest {
+    url: Url,
+}
+
+impl FtpRequest {
+    pub fn new(url: Url) -> Self {
+        Self {
+            url,
+        }
+    }
+}
+
+pub struct FtpResponse {}
+
+pub struct FtpFetcher {
     base_url: Url,
     // client: FtpRequestAgent,
-    // middleware: aMiddlewareStuff<>
+    // middleware: Option<>
 }
 
 impl FtpFetcher {
-    fn new(base_url: Url) {
-
+    pub fn new(base_url: Url) -> Self {
+        Self {
+            base_url,
+        }
     }
 
-    fn fetch(&self, method: FtpMethod, url: Url) -> Result<FtpResponse, Self::Error> {
+    pub async fn fetch(&self, _request: FtpRequest) -> Result<FtpResponse, FtpError> {
+        Ok(FtpResponse {})
     }
 }

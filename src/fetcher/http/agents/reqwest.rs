@@ -60,6 +60,8 @@ impl HttpRequestAgent for ReqwestAgent {
     }
 
     async fn execute(&self, req: HttpRequest) -> Result<HttpResponse, HttpError> {
+        info!("executing request via Reqwest: {:?}", req);
+
         // Additional headers we like to add, besides the ones given in the request
         let mut headers = HeaderMap::new();
         // headers.insert("User-Agent", GOSUB_USERAGENT_STRING.parse().unwrap());
@@ -112,6 +114,7 @@ impl HttpRequestAgent for ReqwestAgent {
                     }
                 };
 
+                info!("response: {:?}", res_header);
                 Ok(HttpResponse::new(res_header, body))
             }
             Err(e) => {
