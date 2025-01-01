@@ -130,7 +130,7 @@ impl Future for ToVec {
             Some(Ok(chunk)) => self.dest_buf.extend_from_slice(&chunk.to_vec()),
             // An error has occurred, so we return an Ready with error
             Some(Err(e)) => return Poll::Ready(Err(e)),
-            // No data found, so the stream is ready. We take our destination buffer and give it back to the caller
+            // No data found, so the stream is ready. We take our destination buffer anfd give it back to the caller
             None => return Poll::Ready(Ok(mem::take(&mut self.dest_buf)))
         }
 
