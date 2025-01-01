@@ -1,3 +1,4 @@
+use log::info;
 use url::Url;
 use crate::fetcher::http::agents::HttpRequestAgent;
 use crate::fetcher::http::http::HttpMethod;
@@ -28,12 +29,14 @@ impl<R: HttpRequestAgent> HttpFetcher<R> {
 
     /// Simple fetch with just method and URL.
     pub async fn fetch(&self, method: HttpMethod, url: Url) -> Result<HttpResponse, HttpError> {
+        info!(target: "fetcher", "HTTP fetching: {:?}", url);
         let req = HttpRequest::new(method, url);
         self.agent.execute(req).await
     }
 
     /// A more complex fetch with a request object.
     pub async fn fetch_with_request(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        info!(target: "fetcher", "HTTP fetching: {:?}", request.url);
         self.agent.execute(request).await
     }
 }

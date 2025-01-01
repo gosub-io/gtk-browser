@@ -40,6 +40,8 @@ pub enum HttpError {
     #[error("Too many redirects: {0}")]
     TooManyRedirects(Url),
     #[error("Certificate error on: {0}")]
-    Certificate(Url)
+    Certificate(Url),
+    #[error("Unknown error")]
+    UnknownError,
 }
 

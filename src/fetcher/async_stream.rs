@@ -133,21 +133,6 @@ impl Future for ToVec {
 mod tests {
     use super::*;
     use tokio::runtime::Builder;
-    // #[tokio::test]
-    // async fn test_async_stream_wrap() {
-    //     let data = vec![Ok(Bytes::from("hello")), Ok(Bytes::from("world"))];
-    //     let mock_stream = stream::iter(data);
-    //     let wrapped = AsyncStreamWrap(mock_stream);
-    //
-    //     let mut pinned = Box::pin(wrapped);
-    //     let mut result = Vec::new();
-    //
-    //     while let Some(item) = pinned.next().await {
-    //         result.extend_from_slice(&item.unwrap());
-    //     }
-    //
-    //     assert_eq!(result, b"helloworld");
-    // }
 
     #[test]
     fn test_async_stream() {

@@ -29,8 +29,10 @@ pub enum FetcherError {
     #[error("gopher error: {0}")]
     Gopher(#[from] gopher::GopherError),
 
-    #[error("unsupported scheme")]
-    UnsupportedScheme
+    #[error("unsupported scheme: {0}")]
+    UnsupportedScheme(String),
+    #[error("invalid URL: {0}")]
+    InvalidUrl(String),
 }
 
 
@@ -144,7 +146,7 @@ impl Fetcher {
             }
             _ => {
                 error!("Unsupported scheme: {}", scheme);
-                Err(FetcherError::UnsupportedScheme)
+                Err(FetcherError::UnsupportedScheme(scheme.to_string()))
             }
         }
     }
@@ -155,21 +157,19 @@ pub async fn fetch_favicon(url: &str) -> Vec<u8> {
         return Vec::new();
     };
 
+    let url = url.join("/favicon.ico").unwrap();
+
     // This should be a method in Fetcher... it's a lot of boilerplate for fetching a simple favicon
     let fetcher = Fetcher::new(url.clone());
     match fetcher.fetch(url).await {
         // There was a correct response
         Ok(response) => {
             match response {
-                /// It is a HTTP response
                 Response::Http(http_response) => {
-                    // It is a 200 OK response
                     if http_response.head().status_code() == 200 {
                         match http_response.body() {
-                            // We've got a body
                             HttpBody::Reader(reader) => {
                                 match reader.to_vec().await {
-                                    // We've got the body as a Vec<u8>
                                     Ok(data) => data,
                                     Err(e) => {
                                         error!("Failed to fetch favicon from URL: {:?}", e);
@@ -183,6 +183,7 @@ pub async fn fetch_favicon(url: &str) -> Vec<u8> {
                         Vec::new()
                     }
                 }
+                #[allow(unreachable_patterns)]
                 _ => Vec::new()
             }
         }
@@ -193,8 +194,49 @@ pub async fn fetch_favicon(url: &str) -> Vec<u8> {
     }
 }
 
-pub async fn fetch_url_body(_url: &str) -> Result<Vec<u8>, FetcherError> {
-    Ok(Vec::new())
+pub async fn fetch_url_body(url_str: &str) -> Result<Vec<u8>, FetcherError> {
+    let Ok(url) = Url::parse(url_str) else {
+        return Err(FetcherError::InvalidUrl(url_str.to_string()));
+    };
+
+    let fetcher = Fetcher::new(url.clone());
+    match fetcher.fetch(url).await {
+        // There was a correct response
+        Ok(response) => {
+            match response {
+                // It is an HTTP response
+                Response::Http(http_response) => {
+                    // It is a 200 OK response
+                    if http_response.head().status_code() == 200 {
+                        match http_response.body() {
+                            // We've got a body
+                            HttpBody::Reader(reader) => {
+                                match reader.to_vec().await {
+                                    // We've got the body as a Vec<u8>
+                                    Ok(data) => Ok(data),
+                                    Err(e) => {
+                                        error!("Failed to fetch body from URL: {:?}", e);
+                                        Err(FetcherError::Http(http::HttpError::UnknownError))
+                                    }
+                                }
+                            }
+                            HttpBody::Empty => Ok(Vec::new())
+                        }
+                    } else {
+                        Err(FetcherError::Http(http::HttpError::UnknownError))
+                    }
+                }
+                #[allow(unreachable_patterns)]
+                _ => {
+                    error!("Unsupported response type. We expected a HTTP response");
+                    Err(FetcherError::Http(http::HttpError::UnknownError))
+                }
+            }
+        }
+        Err(e) => {
+            Err(e)
+        }
+    }
 }
 
 // fn get_favicon() {
