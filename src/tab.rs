@@ -44,6 +44,8 @@ impl fmt::Display for TabId {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HtmlViewMode {
+    // Display the url as an about page (if exists)
+    About,
     /// View the HTML as rendered
     Rendered,
     /// View the HTML as syntax highlighted source

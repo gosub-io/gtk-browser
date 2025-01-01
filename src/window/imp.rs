@@ -195,13 +195,15 @@ impl BrowserWindow {
             view_mode = HtmlViewMode::Xml;
             url = url.replace("xml:", "");
         }
+        if url.starts_with("about:") | url.starts_with("gosub:") {
+            url = url.replace("about:", "");
+            url = url.replace("gosub:", "");
+
+            return (HtmlViewMode::About, url);
+        }
 
         // Make sure the url starts with a proper scheme or about:. If no scheme is present, we assume https://
-        if url.starts_with("about:") {
-            // About: pages are special, we don't need to prefix them with a protocol, and are always renderered
-            view_mode = HtmlViewMode::Rendered;
-
-        } else if url.starts_with("http://") || url.starts_with("https://") {
+        if url.starts_with("http://") || url.starts_with("https://") {
             // URL already has a scheme, we don't need to do anything
         } else {
             // No scheme, we use https:// as a prefix
@@ -301,7 +303,7 @@ impl BrowserWindow {
                     if tab.viewmode() == HtmlViewMode::Source {
                         // @todo: we should be able to do things like json as well. See:
                         // https://github.com/danirod/cartero/blob/4c3a356ccb04be272123126354b91ef707fb7d0e/src/widgets/response_panel.rs#L254C9-L268C19
-                        let lang = LanguageManager::default().language("json");
+                        let lang = LanguageManager::default().language("html");
                         let buf = sourceview5::Buffer::builder()
                             .text(tab.content())
                             .highlight_syntax(true)
@@ -324,6 +326,7 @@ impl BrowserWindow {
                         view.set_auto_indent(true);
                         view.set_cursor_visible(false);
                         view.set_buffer(Some(&buf));
+                        view.set_monospace(true);
                         scrolled_window.set_child(Some(&view));
                     } else if tab.has_drawer() {
                         let tab_clone = tab.clone();
@@ -538,19 +541,15 @@ impl BrowserWindow {
     fn load_url_async(&self, tab_id: TabId) {
         let manager = self.tab_manager.lock().unwrap();
         let tab = manager.get_tab(tab_id).unwrap();
-        let mut url = tab.url().to_string();
-        let mut view_mode = HtmlViewMode::Rendered;
+        let url = tab.url().to_string();
+        let view_mode = tab.viewmode();
         drop(manager);
 
         let sender_clone = self.get_sender().clone();
         runtime().spawn(async move {
-            if url.starts_with("source:") {
-                url = url.replace("source:", "");
-                view_mode = HtmlViewMode::Source;
-            }
-            if url.starts_with("about:") {
+            if view_mode == HtmlViewMode::About {
                 let html_content = load_about_url(url);
-                sender_clone.send(Message::UrlLoaded(tab_id, html_content, HtmlViewMode::Rendered)).await.unwrap();
+                sender_clone.send(Message::UrlLoaded(tab_id, html_content)).await.unwrap();
                 return;
             }
 
@@ -559,7 +558,7 @@ impl BrowserWindow {
                     let html_content = String::from_utf8_lossy(content.as_slice());
                     // we get a Cow.. and we clone it into the url?
                     sender_clone
-                        .send(Message::UrlLoaded(tab_id, html_content.to_string(), view_mode))
+                        .send(Message::UrlLoaded(tab_id, html_content.to_string()))
                         .await
                         .unwrap();
                 }
@@ -650,15 +649,26 @@ impl BrowserWindow {
 
                 self.refresh_tabs();
             }
-            Message::UrlLoaded(tab_id, html_content, viewmode) => {
+            Message::UrlLoaded(tab_id, html_content) => {
                 let mut manager = self.tab_manager.lock().unwrap();
                 let mut tab = manager.get_tab(tab_id).unwrap().clone();
                 tab.set_content(&html_content);
 
-                let url = Url::from_str(tab.url()).unwrap();
+                let url = if tab.viewmode() == HtmlViewMode::About {
+                    // @todo: this needs to be changed
+                    Url::from_str(format!("about:{}", tab.url()).as_str()).unwrap()
+                } else {
+                    match Url::from_str(tab.url()) {
+                        Ok(url) => url,
+                        Err(e) => {
+                            log::error!("Failed to parse URL: {}", e);
+                            self.log(format!("Failed to parse URL: {}", e).as_str());
+                            return
+                        }
+                    }
+                };
                 let d = <GosubEngineConfig as HasTreeDrawer>::TreeDrawer::from_source(url, &html_content, TaffyLayouter, false).unwrap();
                 tab.set_drawer(d);
-                tab.set_viewmode(viewmode);
 
                 // Fetch title from HTML content... poorly..
                 if let Some(title) = fetch_title_from_html(&html_content) {
@@ -736,7 +746,7 @@ impl BrowserWindow {
 
 fn load_about_url(url: String) -> String {
     match url.as_str() {
-        "about:blank" => r#"
+        "blank" => r#"
             <html>
                 <head>
                     <title>Blank page</title>
