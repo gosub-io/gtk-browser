@@ -19,8 +19,18 @@ pub struct HttpRequest {
     pub cookies: HashMap<String, String>,
 }
 
-impl HttpRequest {
-    /// Create a new http request with the given method and URL
+/// Builder for HttpRequest
+#[derive(Clone, Debug)]
+pub struct HttpRequestBuilder {
+    method: HttpMethod,
+    url: Url,
+    query_params: HashMap<String, String>,
+    headers: HashMap<String, String>,
+    body: HttpBody,
+    cookies: HashMap<String, String>,
+}
+
+impl HttpRequestBuilder {
     pub fn new(method: HttpMethod, url: Url) -> Self {
         Self {
             method,
@@ -31,42 +41,36 @@ impl HttpRequest {
             cookies: HashMap::new(),
         }
     }
-}
 
-/// Builder for HttpRequest
-struct HttpRequestBuilder {
-    request: HttpRequest,
-}
+    pub fn query_param(mut self, key: &str, value: &str) -> Self {
+        self.query_params.insert(key.to_string(), value.to_string());
+        self
+    }
 
-impl HttpRequestBuilder {
-    pub fn new(method: HttpMethod, url: Url) -> Self {
-        Self {
-            request: HttpRequest::new(method, url),
+    pub fn header(mut self, key: &str, value: &str) -> Self {
+        self.headers.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn cookie(mut self, key: &str, value: &str) -> Self {
+        self.cookies.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn body(mut self, body: HttpBody) -> Self {
+        self.body = body;
+        self
+    }
+
+    pub fn build(self) -> HttpRequest {
+        HttpRequest {
+            method: self.method,
+            url: self.url,
+            query_params: self.query_params,
+            headers: self.headers,
+            body: self.body,
+            cookies: self.cookies,
         }
-    }
-
-    pub fn query_param(&mut self, key: &str, value: &str) -> &mut Self {
-        self.request.query_params.insert(key.to_string(), value.to_string());
-        self
-    }
-
-    pub fn header(&mut self, key: &str, value: &str) -> &mut Self {
-        self.request.headers.insert(key.to_string(), value.to_string());
-        self
-    }
-
-    pub fn cookie(&mut self, key: &str, value: &str) -> &mut Self {
-        self.request.cookies.insert(key.to_string(), value.to_string());
-        self
-    }
-
-    pub fn body(&mut self, body: HttpBody) -> &mut Self {
-        self.request.body = body;
-        self
-    }
-
-    pub fn build(&self) -> HttpRequest {
-        self.request.clone()
     }
 }
 

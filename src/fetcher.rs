@@ -35,13 +35,14 @@ pub enum FetcherError {
 }
 
 #[cfg(feature = "proto-http")]
-pub use crate::fetcher::http::{request::HttpRequest, response::HttpResponse, CompleteHttpFetcher, HttpBody, HttpMethod};
+pub use crate::fetcher::http::{response::HttpResponse, CompleteHttpFetcher, HttpBody, HttpMethod};
 
 #[cfg(feature = "proto-ftp")]
 pub use crate::fetcher::ftp::{fetcher::FtpFetcher, fetcher::FtpRequest, fetcher::FtpResponse};
 
 #[cfg(feature = "proto-gopher")]
 pub use crate::fetcher::gopher::{fetcher::GopherFetcher, fetcher::GopherRequest, fetcher::GopherResponse};
+use crate::fetcher::http::request::HttpRequestBuilder;
 
 enum Response {
     #[cfg(feature = "proto-http")]
@@ -98,7 +99,7 @@ impl Fetcher {
         match scheme {
             #[cfg(feature = "proto-http")]
             "https" | "http" => {
-                let request = HttpRequest::new(HttpMethod::Get, url);
+                let request = HttpRequestBuilder::new(HttpMethod::Get, url).build();
                 match self.http_fetcher.fetch_with_request(request).await {
                     Ok(response) => Ok(Response::Http(response)),
                     Err(e) => Err(FetcherError::Http(e)),

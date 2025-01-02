@@ -1,5 +1,5 @@
 use crate::fetcher::http::agents::HttpRequestAgent;
-use crate::fetcher::http::request::HttpRequest;
+use crate::fetcher::http::request::{HttpRequest, HttpRequestBuilder};
 use crate::fetcher::http::response::HttpResponse;
 use crate::fetcher::http::HttpError;
 use crate::fetcher::http::HttpMethod;
@@ -30,7 +30,7 @@ impl<R: HttpRequestAgent> HttpFetcher<R> {
     /// Simple fetch with just method and URL.
     pub async fn fetch(&self, method: HttpMethod, url: Url) -> Result<HttpResponse, HttpError> {
         info!(target: "fetcher", "HTTP fetching: {:?}", url);
-        let req = HttpRequest::new(method, url);
+        let req = HttpRequestBuilder::new(method, url).build();
         self.agent.execute(req).await
     }
 
