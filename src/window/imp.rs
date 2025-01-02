@@ -301,32 +301,13 @@ impl BrowserWindow {
                         .build();
 
                     if tab.viewmode() == HtmlViewMode::Source {
-                        // @todo: we should be able to do things like json as well. See:
-                        // https://github.com/danirod/cartero/blob/4c3a356ccb04be272123126354b91ef707fb7d0e/src/widgets/response_panel.rs#L254C9-L268C19
-                        let lang = LanguageManager::default().language("html");
-                        let buf = sourceview5::Buffer::builder()
-                            .text(tab.content())
-                            .highlight_syntax(true)
-                            .highlight_matching_brackets(true)
-                            .build();
-
-                        match lang {
-                            Some(lang) => {
-                                buf.set_language(Some(&lang));
-                            }
-                            None => {
-                                buf.set_language(None);
-                            }
-                        }
-
-                        let view = View::new();
-                        view.set_editable(false);
-                        view.set_show_line_marks(true);
-                        view.set_show_line_numbers(true);
-                        view.set_auto_indent(true);
-                        view.set_cursor_visible(false);
-                        view.set_buffer(Some(&buf));
-                        view.set_monospace(true);
+                        let view = create_view_mode("html", tab.content());
+                        scrolled_window.set_child(Some(&view));
+                    } else if tab.viewmode() == HtmlViewMode::Xml {
+                        let view = create_view_mode("xml", tab.content());
+                        scrolled_window.set_child(Some(&view));
+                    } else if tab.viewmode() == HtmlViewMode::Json {
+                        let view = create_view_mode("json", tab.content());
                         scrolled_window.set_child(Some(&view));
                     } else if tab.has_drawer() {
                         let tab_clone = tab.clone();
@@ -742,6 +723,35 @@ impl BrowserWindow {
         self.load_favicon_async(tab_id);
         self.load_url_async(tab_id);
     }
+}
+
+fn create_view_mode(lang: &str, content: &str) -> View {
+    let lang = LanguageManager::default().language(lang);
+    let buf = sourceview5::Buffer::builder()
+        .text(content)
+        .highlight_syntax(true)
+        .highlight_matching_brackets(true)
+        .build();
+
+    match lang {
+        Some(lang) => {
+            buf.set_language(Some(&lang));
+        }
+        None => {
+            buf.set_language(None);
+        }
+    }
+
+    let view = View::new();
+    view.set_editable(false);
+    view.set_show_line_marks(true);
+    view.set_show_line_numbers(true);
+    view.set_auto_indent(true);
+    view.set_cursor_visible(false);
+    view.set_buffer(Some(&buf));
+    view.set_monospace(true);
+
+    view
 }
 
 fn load_about_url(url: String) -> String {
