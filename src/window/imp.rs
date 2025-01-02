@@ -179,39 +179,39 @@ impl BrowserWindow {
     }
 
     fn sanitize_url(&self, url_str: &str) -> (HtmlViewMode, String) {
-        let mut view_mode = HtmlViewMode::Rendered;
-        let mut url = url_str.to_string();
+        let view_mode = HtmlViewMode::Rendered;
+        let url = url_str.to_string();
 
-        if url.starts_with("source:") {
-            view_mode = HtmlViewMode::Source;
-            url = url.replace("source:", "");
-        }
-        if url.starts_with("raw:") {
-            view_mode = HtmlViewMode::RawSource;
-            url = url.replace("raw:", "");
-        }
-        if url.starts_with("json:") {
-            view_mode = HtmlViewMode::Json;
-            url = url.replace("json:", "");
-        }
-        if url.starts_with("xml:") {
-            view_mode = HtmlViewMode::Xml;
-            url = url.replace("xml:", "");
-        }
-        if url.starts_with("about:") | url.starts_with("gosub:") {
-            url = url.replace("about:", "");
-            url = url.replace("gosub:", "");
-
-            return (HtmlViewMode::About, url);
-        }
-
-        // Make sure the url starts with a proper scheme or about:. If no scheme is present, we assume https://
-        if url.starts_with("http://") || url.starts_with("https://") {
-            // URL already has a scheme, we don't need to do anything
-        } else {
-            // No scheme, we use https:// as a prefix
-            url = format!("https://{}", url);
-        }
+        //
+        // // Default to https:// scheme if none is provided
+        // if url.scheme().is_none() {
+        //     url.scheme = Some("https");
+        // }
+        //
+        // if url.scheme() == Some("source") {
+        //     view_mode = HtmlViewMode::Source;
+        // }
+        // if url.scheme() == Some("raw") {
+        //     view_mode = HtmlViewMode::RawSource;
+        //
+        // }
+        // if url.scheme() == Some("json") {
+        //     view_mode = HtmlViewMode::Json;
+        //     url = url.replace("json:", "");
+        // }
+        // if url.scheme() == Some("xml") {
+        //     view_mode = HtmlViewMode::Xml;
+        //     url = url.replace("xml:", "");
+        // }
+        // if url.scheme() == Some("xml") {
+        //     view_mode = HtmlViewMode::Xml;
+        //     url = url.replace("xml:", "");
+        // }
+        //
+        // if url.scheme() == Some("gosub") || url.scheme() == Some("about") {
+        //     url.scheme = None;
+        //     return (HtmlViewMode::About, url);
+        // }
 
         (view_mode, url)
     }

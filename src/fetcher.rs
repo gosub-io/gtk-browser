@@ -13,6 +13,7 @@ mod gopher;
 mod http;
 
 mod async_stream;
+mod address_parser;
 
 #[derive(Error, Debug)]
 pub enum FetcherError {

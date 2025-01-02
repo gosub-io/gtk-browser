@@ -60,7 +60,8 @@ impl BrowserWindow {
         let window_clone = window.clone();
         spawn_future_local(async move {
             let initial_urls = [
-                "https://gosub.io",
+                "gopher://gopher.meulie.net",
+                // "https://gosub.io",
                 // "source:https://httpbin.org/json",
                 // "source:https://gosub.io/test.html",
                 // "https://www.microsoft.com/en-us/",
