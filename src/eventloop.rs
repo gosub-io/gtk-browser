@@ -8,7 +8,7 @@ pub struct WindowEventLoopDummy;
 
 impl WindowedEventLoop<GosubEngineConfig> for WindowEventLoopDummy {
     fn redraw(&mut self) {
-        info!("eventloop: Redraw needed");
+        info!(target: "eventloop", "Redraw needed");
     }
 
     fn add_img_cache(
@@ -17,14 +17,14 @@ impl WindowedEventLoop<GosubEngineConfig> for WindowEventLoopDummy {
         _buf: ImageBuffer<<GosubEngineConfig as HasRenderBackend>::RenderBackend>,
         _size: Option<SizeU32>,
     ) {
-        info!("eventloop: Add image to cache: {}", url);
+        info!(target: "eventloop", "Add image to cache: {}", url);
     }
 
     fn reload_from(&mut self, _rt: <GosubEngineConfig as HasRenderTree>::RenderTree) {
-        info!("eventloop: reload from")
+        info!(target: "eventloop", "reload from")
     }
 
     fn open_tab(&mut self, _url: Url) {
-        info!("eventloop: open tab")
+        info!(target: "eventloop", "open tab")
     }
 }

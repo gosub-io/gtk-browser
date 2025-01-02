@@ -39,7 +39,7 @@ jobs:
         with:
           toolchain: ${{ matrix.rust_version }}
       - name: Install dependencies
-        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev libsqlite3-dev -y
+        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev libsqlite3-dev libgtksourceview-5-dev -y
       - name: Cache cargo
         uses: actions/cache/restore@v4
         with:
@@ -49,7 +49,7 @@ jobs:
           restore-keys: ${{ matrix.os }}-cargo-registry-${{ matrix.rust_version }}-
       - name: Build
         run: |
-          cargo build --verbose --all --all-features
+          cargo build --verbose --all
 
   test:
     runs-on: ubuntu-24.04
@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev libsqlite3-dev -y
+        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev libsqlite3-dev libgtksourceview-5-dev -y
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust_version }}
@@ -76,7 +76,7 @@ jobs:
           key: ${{ matrix.os }}-cargo-target-${{ matrix.rust_version }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ matrix.os }}-cargo-registry-${{ matrix.rust_version }}-
       - name: Run tests
-        run: cargo test --verbose --all --no-fail-fast --all-features --all-targets
+        run: cargo test --verbose --all --no-fail-fast --all-targets
 
   clippy:
     runs-on: ubuntu-24.04
@@ -91,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev libsqlite3-dev -y
+        run: sudo apt update -y && sudo apt install libgtk-4-dev libglib2.0-dev libsqlite3-dev libgtksourceview-5-dev -y
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust_version }}

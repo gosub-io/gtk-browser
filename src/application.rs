@@ -26,7 +26,7 @@ mod imp {
 
     impl ApplicationImpl for Application {
         fn activate(&self) {
-            info!("GtkApplication<Application>::activate");
+            info!(target: "gtk", "GtkApplication<Application>::activate");
             self.parent_activate();
 
             let obj = self.obj();
@@ -41,7 +41,7 @@ mod imp {
         }
 
         fn startup(&self) {
-            info!("GtkApplication<Application>::startup");
+            info!(target: "gtk", "GtkApplication<Application>::startup");
             self.parent_startup();
 
             let obj = self.obj();
@@ -92,7 +92,7 @@ impl Application {
                 #[weak(rename_to=_app)]
                 self,
                 move |_, _| {
-                    info!("Toggle dark mode action triggered");
+                    info!(target: "gtk", "Toggle dark mode action triggered");
                     let settings = Settings::default().expect("Failed to get default GtkSettings");
                     let mode: bool = settings.property("gtk-application-prefer-dark-theme");
                     settings.set_property("gtk-application-prefer-dark-theme", !mode);
@@ -107,7 +107,7 @@ impl Application {
                 #[weak(rename_to=_app)]
                 self,
                 move |_, _| {
-                    info!("Show about dialog action triggered");
+                    info!(target: "gtk", "Show about dialog action triggered");
                     let about = About::create_dialog();
                     about.present();
                 }
@@ -121,7 +121,7 @@ impl Application {
                 #[weak(rename_to=app)]
                 self,
                 move |_, _| {
-                    info!("Show about dialog action triggered");
+                    info!(target: "gtk", "Show about dialog action triggered");
                     let about = ShortcutsDialog::create_dialog(&app);
                     about.present();
                 }
@@ -139,6 +139,7 @@ impl Application {
 
     pub fn run(&self) {
         info!("Application started");
+        sourceview5::init();
         ApplicationExtManual::run(self);
     }
 }

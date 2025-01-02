@@ -61,7 +61,8 @@ impl BrowserWindow {
         spawn_future_local(async move {
             let initial_urls = [
                 "https://gosub.io",
-                "https://gosub.io/test.html",
+                // "source:https://httpbin.org/json",
+                // "source:https://gosub.io/test.html",
                 // "https://www.microsoft.com/en-us/",
                 // "https://github.com",
                 // "https://reddit.com",

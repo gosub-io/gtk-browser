@@ -3,26 +3,26 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 
 pub enum Message {
-    // Open a new tab, and load a URL
+    /// Open a new tab, and load a URL
     OpenTab(String, String),
-    // Opens a new tab on the right side of the given TabID
+    /// Opens a new tab on the right side of the given TabID
     OpenTabRight(TabId, String, String),
     /// Sent when we need to load a new url into a tab
     LoadUrl(TabId, String),
 
     /// Sent when a favicon has been loaded for tab X
     FaviconLoaded(TabId, Vec<u8>),
-    // Sent when a URL has been loaded for tab X
+    /// Sent when a URL has been loaded for tab X
     UrlLoaded(TabId, String),
-    // Refresh tabs
+    /// Refresh tabs
     RefreshTabs(),
 
-    // Pins a tab
+    /// Pins a tab
     PinTab(TabId),
-    // Unpins a tab
+    /// Unpins a tab
     UnpinTab(TabId),
 
-    // Single message to print in the log
+    /// Single message to print in the log
     Log(String),
 }
 
