@@ -1,7 +1,7 @@
+use crate::fetcher::http::HttpBody;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use url::Url;
-use crate::fetcher::http::http::HttpBody;
 
 pub struct HttpResponse {
     /// Http header data
@@ -9,7 +9,6 @@ pub struct HttpResponse {
     /// Actual body data
     body: HttpBody,
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HttpVersion {
@@ -20,7 +19,6 @@ pub enum HttpVersion {
     Http3,
     Custom(String),
 }
-
 
 impl Display for HttpVersion {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -53,7 +51,14 @@ pub struct ResponseHeader {
 }
 
 impl ResponseHeader {
-    pub fn new(version: HttpVersion, status_code: u16, headers: HashMap<String, String>, content_length: Option<u64>, cookies: HashMap<String, String>, url: Url) -> Self {
+    pub fn new(
+        version: HttpVersion,
+        status_code: u16,
+        headers: HashMap<String, String>,
+        content_length: Option<u64>,
+        cookies: HashMap<String, String>,
+        url: Url,
+    ) -> Self {
         Self {
             version,
             status_code,
@@ -91,10 +96,7 @@ impl ResponseHeader {
 
 impl HttpResponse {
     pub fn new(head: ResponseHeader, body: HttpBody) -> Self {
-        Self {
-            header: head,
-            body,
-        }
+        Self { header: head, body }
     }
 
     pub fn head(&self) -> &ResponseHeader {
@@ -124,6 +126,6 @@ mod test {
         let response = HttpResponse::new(head, body);
         assert_eq!(response.head().version, HttpVersion::Http11);
         assert_eq!(response.head().status_code, 200);
-        assert_eq!(response.head().url.as_str(), "https://example.com");
+        assert_eq!(response.head().url.as_str(), "https://example.com/");
     }
 }

@@ -1,6 +1,6 @@
+use crate::fetcher::http::{HttpBody, HttpMethod};
 use std::collections::HashMap;
 use url::Url;
-use crate::fetcher::http::http::{HttpBody, HttpMethod};
 
 /// Gosub HTTP Request
 #[derive(Debug, Clone)]
@@ -69,7 +69,6 @@ impl HttpRequestBuilder {
         self.request.clone()
     }
 }
-
 
 #[cfg(test)]
 mod test {

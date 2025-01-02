@@ -1,10 +1,10 @@
-use log::info;
-use url::Url;
 use crate::fetcher::http::agents::HttpRequestAgent;
-use crate::fetcher::http::http::HttpMethod;
 use crate::fetcher::http::request::HttpRequest;
 use crate::fetcher::http::response::HttpResponse;
 use crate::fetcher::http::HttpError;
+use crate::fetcher::http::HttpMethod;
+use log::info;
+use url::Url;
 
 /// The HTTP fetcher is the main entry point for fetching HTTP resources (starting with https:// or http://).
 /// It uses a HttpRequestAgent to actually perform the HTTP requests. All URLs are resolved relative to the base URL.
@@ -14,7 +14,7 @@ pub struct HttpFetcher<R: HttpRequestAgent> {
     /// Actual library that does the HTTP fetching
     agent: R,
     /// Additional middleware (logging, caching, security?)
-    middleware: Option<String>
+    middleware: Option<String>,
 }
 
 impl<R: HttpRequestAgent> HttpFetcher<R> {

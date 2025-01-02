@@ -1,6 +1,6 @@
-use crate::fetcher::http::HttpError;
 use crate::fetcher::http::request::HttpRequest;
 use crate::fetcher::http::response::HttpResponse;
+use crate::fetcher::http::HttpError;
 
 #[cfg(all(feature = "http-agent", not(any(feature = "http-agent-reqwest", feature = "http-agent-ureq"))))]
 compile_error!(
@@ -24,5 +24,3 @@ pub trait HttpRequestAgent {
     /// Executes the given request and returns the response or an error
     async fn execute(&self, req: HttpRequest) -> Result<HttpResponse, HttpError>;
 }
-
-

@@ -7,7 +7,7 @@ use std::task::{ready, Context, Poll};
 use std::{cmp, mem};
 
 /// Default buffer size of our vec<u8> when we cannot determine the size of our stream. Seems a reasonable default.
-const DEFAULT_BUF_SIZE: usize = 1 * 1024;
+const DEFAULT_BUF_SIZE: usize = 1024;
 
 // This defines that a stream is a future_core stream that returns a result or Bytes. This is how we get
 // our data from the underlying library (reqwest in this case), but we want to work with vec<u8>.
@@ -76,7 +76,7 @@ impl AsyncStream {
     }
 
     /// Method to convert the stream (of bytes::Bytes) into a vec<u8>.
-    pub fn to_vec(self) -> ToVec {
+    pub fn vec(self) -> ToVec {
         // We try to determine the size of the stream (if possible), or use a default size if we can't
         // detect this. This will set the capacity of our destination buffer.
         let (min_size, size) = self.stream.size_hint();
@@ -89,8 +89,8 @@ impl AsyncStream {
     }
 
     /// This function captures a whole stream and turns it into a Bytes::bytes
-    pub fn to_bytes(self) -> impl Future<Output = anyhow::Result<Bytes>> {
-        let to_vec = self.to_vec();
+    pub fn bytes(self) -> impl Future<Output = anyhow::Result<Bytes>> {
+        let to_vec = self.vec();
         async move {
             let vec = to_vec.await?;
             Ok(Bytes::from(vec))
@@ -119,7 +119,7 @@ impl Future for ToVec {
 
             match chunk {
                 // A chunk of data will be converted to vec<u8> and added to our destination buffer
-                Some(Ok(chunk)) => self.dest_buf.extend_from_slice(&chunk.to_vec()),
+                Some(Ok(chunk)) => self.dest_buf.extend_from_slice(&chunk),
                 // An error has occurred, so we return an Ready with error
                 Some(Err(e)) => return Poll::Ready(Err(e)),
                 // No data found, so the stream is ready. We take our destination buffer anfd give it back to the caller
@@ -143,7 +143,7 @@ mod tests {
 
             println!("requested, streaming");
 
-            let bytes = AsyncStream::new(stream, None).to_bytes().await.unwrap();
+            let bytes = AsyncStream::new(stream, None).bytes().await.unwrap();
 
             assert_eq!(bytes.len(), 100000);
         });

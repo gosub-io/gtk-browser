@@ -13,15 +13,18 @@ use gtk4::glib::Quark;
 use gtk4::graphene::Point;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{gdk, glib, Button, CompositeTemplate, DrawingArea, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow, Settings, TemplateChild, TextView, ToggleButton, Widget};
+use gtk4::{
+    gdk, glib, Button, CompositeTemplate, DrawingArea, Entry, GestureClick, Image, Notebook, PopoverMenu, PopoverMenuFlags, ScrolledWindow,
+    Settings, TemplateChild, TextView, ToggleButton, Widget,
+};
 use log::info;
 use once_cell::sync::Lazy;
 use reqwest::Url;
+use sourceview5::prelude::*;
+use sourceview5::{LanguageManager, View};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
-use sourceview5::prelude::*;
-use sourceview5::{LanguageManager, View};
 
 // Create a static Quark as a unique key
 static TAB_ID_QUARK: Lazy<Quark> = Lazy::new(|| Quark::from_str("tab_id"));
@@ -644,7 +647,7 @@ impl BrowserWindow {
                         Err(e) => {
                             log::error!("Failed to parse URL: {}", e);
                             self.log(format!("Failed to parse URL: {}", e).as_str());
-                            return
+                            return;
                         }
                     }
                 };
@@ -702,7 +705,7 @@ impl BrowserWindow {
     /// Opens a new tab at the given position, with the given URL and title. If the position is None,
     /// the tab will be added at the end of the tab-bar.
     fn open_tab(&self, position: Option<usize>, url_str: &str, title: &str) {
-        let (view_mode, url) = self.sanitize_url(&url_str);
+        let (view_mode, url) = self.sanitize_url(url_str);
         dbg!(&view_mode);
         dbg!(&url_str);
 

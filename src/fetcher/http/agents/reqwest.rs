@@ -1,18 +1,18 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use crate::cookies::jar::CookieJar;
+use crate::cookies::sqlite_store::SqliteStorage;
+use crate::fetcher::async_stream::AsyncStream;
+use crate::fetcher::http::agents::HttpRequestAgent;
+use crate::fetcher::http::request::HttpRequest;
+use crate::fetcher::http::response::{HttpResponse, HttpVersion, ResponseHeader};
+use crate::fetcher::http::HttpError;
+use crate::fetcher::http::{HttpBody, GOSUB_USERAGENT_STRING};
+use crate::fetcher::HttpMethod;
 use log::info;
 use reqwest::header::{HeaderMap, HeaderName};
 use reqwest::{Method, Version};
-use crate::cookies::jar::CookieJar;
-use crate::cookies::sqlite_store::SqliteStorage;
-use crate::fetcher::async_stream::{AsyncStream};
-use crate::fetcher::http::agents::HttpRequestAgent;
-use crate::fetcher::http::http::{HttpBody, GOSUB_USERAGENT_STRING};
-use crate::fetcher::http::HttpError;
-use crate::fetcher::http::request::HttpRequest;
-use crate::fetcher::http::response::{HttpResponse, HttpVersion, ResponseHeader};
-use crate::fetcher::HttpMethod;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Http agent that uses reqwest library to make HTTP requests
 pub struct ReqwestAgent {
@@ -80,25 +80,27 @@ impl HttpRequestAgent for ReqwestAgent {
         // Cookies are automatically added through the CookieJar we defined in the constructor
 
         let request_builder = self.client.request(req.method.into(), req.url.clone()).headers(headers.clone());
-        let request = request_builder.build()
-        .map_err(|e| HttpError::AgentError(Box::new(e)))?;
-
+        let request = request_builder.build().map_err(|e| HttpError::AgentError(Box::new(e)))?;
 
         match self.client.execute(request).await {
             Ok(response) => {
                 let res_header = ResponseHeader::new(
                     response.version().into(),
                     response.status().into(),
-                    response.headers().iter().map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap().to_string())).collect(),
+                    response
+                        .headers()
+                        .iter()
+                        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap().to_string()))
+                        .collect(),
                     response.content_length(),
                     response.cookies().map(|c| (c.name().to_string(), c.value().to_string())).collect(),
                     req.url.clone(),
                 );
 
-
                 // Check if we have a content length, if so, we can decide if we want to read the
                 // body as a whole (if small enough), or we need to stream it
-                let body = match response.content_length() { //TODO: it might not be correct to decide on the content length what to do
+                let body = match response.content_length() {
+                    //TODO: it might not be correct to decide on the content length what to do
                     Some(len) => {
                         if len == 0 {
                             // Length is explicitly 0, we assume there isn't a body found
@@ -151,8 +153,7 @@ impl From<reqwest::Method> for HttpMethod {
             Method::PATCH => HttpMethod::Patch,
             Method::HEAD => HttpMethod::Head,
             Method::CONNECT => HttpMethod::Connect,
-            _ => HttpMethod::Custom(value.to_string())
-
+            _ => HttpMethod::Custom(value.to_string()),
         }
     }
 }
@@ -168,7 +169,7 @@ impl From<HttpMethod> for Method {
             HttpMethod::Patch => Method::PATCH,
             HttpMethod::Head => Method::HEAD,
             HttpMethod::Connect => Method::CONNECT,
-            HttpMethod::Custom(s) => Method::from_bytes(s.as_bytes()).unwrap()
+            HttpMethod::Custom(s) => Method::from_bytes(s.as_bytes()).unwrap(),
         }
     }
 }

@@ -1,8 +1,8 @@
-use url::Url;
 use crate::fetcher::http::agents::HttpRequestAgent;
-use crate::fetcher::http::HttpError;
 use crate::fetcher::http::request::HttpRequest;
 use crate::fetcher::http::response::HttpResponse;
+use crate::fetcher::http::HttpError;
+use url::Url;
 
 pub struct UreqAgent;
 

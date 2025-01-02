@@ -1,19 +1,18 @@
 use log::error;
-use url::Url;
 use thiserror::Error;
+use url::Url;
 
 #[cfg(not(feature = "proto-http"))]
 compile_error!("Feature 'proto-http' cannot be disabled.");
 
-#[cfg(feature = "proto-http")]
-mod http;
 #[cfg(feature = "proto-ftp")]
 mod ftp;
 #[cfg(feature = "proto-gopher")]
 mod gopher;
+#[cfg(feature = "proto-http")]
+mod http;
 
 mod async_stream;
-
 
 #[derive(Error, Debug)]
 pub enum FetcherError {
@@ -35,29 +34,14 @@ pub enum FetcherError {
     InvalidUrl(String),
 }
 
-
 #[cfg(feature = "proto-http")]
-pub use crate::fetcher::http::{
-    CompleteHttpFetcher,
-    response::HttpResponse,
-    request::HttpRequest,
-    http::HttpMethod,
-};
+pub use crate::fetcher::http::{request::HttpRequest, response::HttpResponse, CompleteHttpFetcher, HttpBody, HttpMethod};
 
 #[cfg(feature = "proto-ftp")]
-pub use crate::fetcher::ftp::{
-    fetcher::FtpFetcher,
-    fetcher::FtpRequest,
-    fetcher::FtpResponse
-};
+pub use crate::fetcher::ftp::{fetcher::FtpFetcher, fetcher::FtpRequest, fetcher::FtpResponse};
 
 #[cfg(feature = "proto-gopher")]
-pub use crate::fetcher::gopher::{
-    fetcher::GopherFetcher,
-    fetcher::GopherRequest,
-    fetcher::GopherResponse
-};
-use crate::fetcher::http::http::HttpBody;
+pub use crate::fetcher::gopher::{fetcher::GopherFetcher, fetcher::GopherRequest, fetcher::GopherResponse};
 
 enum Response {
     #[cfg(feature = "proto-http")]
@@ -74,7 +58,7 @@ enum Response {
 
 pub struct Fetcher {
     #[cfg(feature = "proto-http")]
-    http_fetcher: CompleteHttpFetcher,  // This is the fetcher with the compiled request agent (ie: HttpAgent<ReqwestAgent>)
+    http_fetcher: CompleteHttpFetcher, // This is the fetcher with the compiled request agent (ie: HttpAgent<ReqwestAgent>)
     #[cfg(feature = "proto-ftp")]
     ftp_fetcher: FtpFetcher,
     #[cfg(feature = "proto-gopher")]
@@ -83,20 +67,18 @@ pub struct Fetcher {
 
 impl Fetcher {
     pub fn protocols_implemented() -> Vec<String> {
-        let mut protocols = vec![];
-
-        #[cfg(feature = "proto-http")]
-        protocols.push("http".to_string());
-        #[cfg(feature = "proto-ftp")]
-        protocols.push("ftp".to_string());
-        // #[cfg(feature = "proto-file")]
-        // protocols.push("file".to_string());
-        // #[cfg(feature = "proto-irc")]
-        // protocols.push("irc".to_string());
-        #[cfg(feature = "proto-gopher")]
-        protocols.push("gopher".to_string());
-
-        protocols
+        vec![
+            #[cfg(feature = "proto-http")]
+            "http".to_string(),
+            #[cfg(feature = "proto-ftp")]
+            "ftp".to_string(),
+            // #[cfg(feature = "proto-file")]
+            // "file".to_string(),
+            // #[cfg(feature = "proto-irc")]
+            // "irc".to_string(),
+            #[cfg(feature = "proto-gopher")]
+            "gopher".to_string(),
+        ]
     }
 
     pub fn new(base_url: Url) -> Self {
@@ -163,27 +145,23 @@ pub async fn fetch_favicon(url: &str) -> Vec<u8> {
     let fetcher = Fetcher::new(url.clone());
     match fetcher.fetch(url).await {
         // There was a correct response
-        Ok(response) => {
-            match response {
-                Response::Http(http_response) => {
-                    if http_response.head().status_code() == 200 {
-                        match http_response.body() {
-                            HttpBody::Reader(reader) => {
-                                reader.to_vec().await.unwrap_or_else(|e| {
-                                    error!("Failed to fetch favicon from URL: {:?}", e);
-                                    Vec::new()
-                                })
-                            }
-                            HttpBody::Empty => Vec::new()
-                        }
-                    } else {
-                        Vec::new()
+        Ok(response) => match response {
+            Response::Http(http_response) => {
+                if http_response.head().status_code() == 200 {
+                    match http_response.body() {
+                        HttpBody::Reader(reader) => reader.vec().await.unwrap_or_else(|e| {
+                            error!("Failed to fetch favicon from URL: {:?}", e);
+                            Vec::new()
+                        }),
+                        HttpBody::Empty => Vec::new(),
                     }
+                } else {
+                    Vec::new()
                 }
-                #[allow(unreachable_patterns)]
-                _ => Vec::new()
             }
-        }
+            #[allow(unreachable_patterns)]
+            _ => Vec::new(),
+        },
         Err(e) => {
             error!("Failed to fetch favicon from URL: {:?}", e);
             Vec::new()
@@ -208,7 +186,7 @@ pub async fn fetch_url_body(url_str: &str) -> Result<Vec<u8>, FetcherError> {
                         match http_response.body() {
                             // We've got a body
                             HttpBody::Reader(reader) => {
-                                match reader.to_vec().await {
+                                match reader.vec().await {
                                     // We've got the body as a Vec<u8>
                                     Ok(data) => Ok(data),
                                     Err(e) => {
@@ -217,7 +195,7 @@ pub async fn fetch_url_body(url_str: &str) -> Result<Vec<u8>, FetcherError> {
                                     }
                                 }
                             }
-                            HttpBody::Empty => Ok(Vec::new())
+                            HttpBody::Empty => Ok(Vec::new()),
                         }
                     } else {
                         Err(FetcherError::Http(http::HttpError::UnknownError))
@@ -230,8 +208,6 @@ pub async fn fetch_url_body(url_str: &str) -> Result<Vec<u8>, FetcherError> {
                 }
             }
         }
-        Err(e) => {
-            Err(e)
-        }
+        Err(e) => Err(e),
     }
 }

@@ -3,18 +3,18 @@ mod cookies;
 mod dialog;
 pub mod engine;
 mod eventloop;
-mod tab;
-mod window;
 #[allow(dead_code)]
 mod fetcher;
+mod tab;
+mod window;
 
 use crate::application::Application;
+use crate::fetcher::Fetcher;
 use gtk4::gdk::Display;
 use gtk4::prelude::ApplicationExt;
 use gtk4::{gio, CssProvider};
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
-use crate::fetcher::Fetcher;
 
 const APP_ID: &str = "io.gosub.browser-gtk";
 
