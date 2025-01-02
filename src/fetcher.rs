@@ -66,18 +66,18 @@ pub struct Fetcher {
 }
 
 impl Fetcher {
-    pub fn protocols_implemented() -> Vec<String> {
-        vec![
+    pub const fn protocols_implemented() -> &'static [&'static str] {
+        &[
             #[cfg(feature = "proto-http")]
-            "http".to_string(),
+            "http",
             #[cfg(feature = "proto-ftp")]
-            "ftp".to_string(),
+            "ftp",
             // #[cfg(feature = "proto-file")]
-            // "file".to_string(),
+            // "file",
             // #[cfg(feature = "proto-irc")]
-            // "irc".to_string(),
+            // "irc",
             #[cfg(feature = "proto-gopher")]
-            "gopher".to_string(),
+            "gopher",
         ]
     }
 
