@@ -1,34 +1,34 @@
-use std::collections::HashMap;
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 use url::Url;
 
-/// There is a difference between a Gosub Address and a URL. A Gosub Address is something that a user
-/// can enter on the address bar and can be resolved in different ways. For example, the user can enter
-/// `example.com`, and the browser will resolve it to `https://example.com`. Or the user can enter
-/// `source:example.com`, and the browser will resolve it to `https://example.com`, but will set the
-/// render mode to "source". This can trigger the renderer to render the source code of the page instead
-/// of rendering the page itself.
-///
-/// This module provides a parser that can parse a Gosub Address and convert it into a URL and a rendering
-/// mode. The `GosubRenderMode` enum defines the different rendering modes that are supported.
-///
-/// The difference between render modes and schemes:
-///
-/// - Render modes are used to determine how the content should be rendered. For example, if the render
-///   mode is set to "source", then the content should be rendered as source code. The actual URL that is
-///   being rendered will have its own scheme (most likely https:// or http://).
-/// - Schemes are used to determine how the URL should be resolved. For example, if the scheme is set to
-///   "gopher", then the URL should be resolved as an gopher address and rendered as a gopher page
-///   (provided the render mode is set to "rendered").
-///
-/// When functionality is wanted, for instance a custom calclator or a custom search engine, the user
-/// could use a custom scheme resolver to resolve the URL to a custom page. For example, the user could
-/// enter `calc:2+2` and the browser would resolve it to `calc:2+2` and render the result of the calculation
-/// (4) instead of rendering the page.
-///
-/// Basically:
-///    - Custom renderer: for a custom view of a URL
-///    - Custom scheme: for custom functionality based on the URL
+// There is a difference between a Gosub Address and a URL. A Gosub Address is something that a user
+// can enter on the address bar and can be resolved in different ways. For example, the user can enter
+// `example.com`, and the browser will resolve it to `https://example.com`. Or the user can enter
+// `source:example.com`, and the browser will resolve it to `https://example.com`, but will set the
+// render mode to "source". This can trigger the renderer to render the source code of the page instead
+// of rendering the page itself.
+//
+// This module provides a parser that can parse a Gosub Address and convert it into a URL and a rendering
+// mode. The `GosubRenderMode` enum defines the different rendering modes that are supported.
+//
+// The difference between render modes and schemes:
+//
+// - Render modes are used to determine how the content should be rendered. For example, if the render
+//   mode is set to "source", then the content should be rendered as source code. The actual URL that is
+//   being rendered will have its own scheme (most likely https:// or http://).
+// - Schemes are used to determine how the URL should be resolved. For example, if the scheme is set to
+//   "gopher", then the URL should be resolved as an gopher address and rendered as a gopher page
+//   (provided the render mode is set to "rendered").
+//
+// When functionality is wanted, for instance a custom calclator or a custom search engine, the user
+// could use a custom scheme resolver to resolve the URL to a custom page. For example, the user could
+// enter `calc:2+2` and the browser would resolve it to `calc:2+2` and render the result of the calculation
+// (4) instead of rendering the page.
+//
+// Basically:
+//    - Custom renderer: for a custom view of a URL
+//    - Custom scheme: for custom functionality based on the URL
 
 /*
 Ultimately, we want this to be more flexible by using some kind of extension system so user-agent can
@@ -48,14 +48,11 @@ Call on the address bar with:   `reverse-view:https://www.gosub.io
 
 */
 
-
 /// Defines the different rendering modes for a URL.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum GosubRenderMode {
+pub enum GosubRenderMode {
     /// Rendered as-is (mostly HTML)
     Rendered,
-    /// Special about pages
-    About,
     /// Rendered as highlighted source
     Source,
     /// Rendered as raw source
@@ -73,7 +70,6 @@ lazy_static! {
         let mut m = HashMap::new();
         m.insert("source:", GosubRenderMode::Source);
         m.insert("view-source:", GosubRenderMode::Source);
-        m.insert("about:", GosubRenderMode::About);
         m.insert("raw:", GosubRenderMode::RawSource);
         m.insert("raw-source:", GosubRenderMode::RawSource);
         m.insert("json:", GosubRenderMode::Json);
@@ -87,7 +83,7 @@ const DEFAULT_SCHEME: &str = "https://";
 
 /// Allows to parse a Gosub address (something that you can type on the address bar), and
 /// converts it into a URL and a rendering mode.
-struct GosubAddressParser {}
+pub struct GosubAddressParser {}
 
 impl GosubAddressParser {
     /// Parses the given address into a URL and a rendering mode.
@@ -105,26 +101,6 @@ impl GosubAddressParser {
             }
         }
 
-        // If scheme is about:, then we MUST have a URL that does not start with a scheme.as
-        if mode == GosubRenderMode::About {
-            match Url::parse(address) {
-                Ok(url) => {
-                    if url.scheme() == "about" {
-                        return Ok((mode, url));
-                    } else {
-                        return Err(anyhow::anyhow!("Invalid about: URL: {}", url.scheme()));
-                    }
-                }
-                Err(url::ParseError::RelativeUrlWithoutBase) => {
-                    return Ok((mode, Url::parse(&format!("about:{}", address))?));
-                }
-                Err(_) => {
-                    return Err(anyhow::anyhow!("Invalid about: URL: {}", address));
-                }
-
-            }
-        }
-
         match Url::parse(address) {
             Ok(url) => Ok((mode, url)),
             Err(url::ParseError::RelativeUrlWithoutBase) => {
@@ -134,9 +110,7 @@ impl GosubAddressParser {
                     Err(e) => Err(e),
                 }
             }
-            Err(e) => {
-                Err(anyhow::anyhow!("Cannot parse URL: {}", e))
-            },
+            Err(e) => Err(anyhow::anyhow!("Cannot parse URL: {}", e)),
         }
     }
 }
@@ -177,21 +151,6 @@ mod tests {
         }
     }
 
-    macro_rules! address_invalid {
-    ($($name:ident: $value:expr,)*) => {
-        $(
-            #[test]
-            fn $name() {
-                let address = $value;
-                match GosubAddressParser::parse(address) {
-                    Ok(_) => panic!("Expected an error but got success for address: {}", address),
-                    Err(_) => assert!(true, "Successfully detected invalid address: {}", address),
-                }
-            }
-        )*
-    }
-}
-
     address_valid! {
         test_1: ("https://example.com", GosubRenderMode::Rendered, "https", "example.com", "/"),
         test_2: ("example.com", GosubRenderMode::Rendered, "https", "example.com", "/"),
@@ -208,12 +167,7 @@ mod tests {
         test_32: ("raw:gopher://example.com", GosubRenderMode::RawSource, "gopher", "example.com", ""),
         test_34: ("xml:example", GosubRenderMode::Xml, "https", "example", "/"),
 
-        test_40: ("about:blank", GosubRenderMode::About, "about", "", "blank"),
-    }
-
-    address_invalid! {
-        test_invalid_1: "source:about:blank",
-        test_invalid_2: "about:http://example.com",
-        test_invalid_3: "about:irc://example.com",
+        test_40: ("about:blank", GosubRenderMode::Rendered, "about", "", "blank"),
+        test_41: ("source:about:blank", GosubRenderMode::Source, "about", "", "blank"),
     }
 }

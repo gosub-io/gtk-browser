@@ -1,6 +1,7 @@
 use crate::engine::GosubEngineConfig;
 use crate::eventloop::WindowEventLoopDummy;
-use crate::tab::{GosubTab, GosubTabManager, HtmlViewMode, TabCommand, TabId};
+use crate::fetcher::address_parser::{GosubAddressParser, GosubRenderMode};
+use crate::tab::{GosubTab, GosubTabManager, TabCommand, TabId};
 use crate::window::message::Message;
 use crate::window::tab_context_menu::{build_context_menu, setup_context_menu_actions, TabInfo};
 use crate::{fetcher, runtime};
@@ -19,10 +20,8 @@ use gtk4::{
 };
 use log::info;
 use once_cell::sync::Lazy;
-use reqwest::Url;
 use sourceview5::prelude::*;
 use sourceview5::{LanguageManager, View};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -177,44 +176,6 @@ impl BrowserWindow {
             }
         }
     }
-
-    fn sanitize_url(&self, url_str: &str) -> (HtmlViewMode, String) {
-        let view_mode = HtmlViewMode::Rendered;
-        let url = url_str.to_string();
-
-        //
-        // // Default to https:// scheme if none is provided
-        // if url.scheme().is_none() {
-        //     url.scheme = Some("https");
-        // }
-        //
-        // if url.scheme() == Some("source") {
-        //     view_mode = HtmlViewMode::Source;
-        // }
-        // if url.scheme() == Some("raw") {
-        //     view_mode = HtmlViewMode::RawSource;
-        //
-        // }
-        // if url.scheme() == Some("json") {
-        //     view_mode = HtmlViewMode::Json;
-        //     url = url.replace("json:", "");
-        // }
-        // if url.scheme() == Some("xml") {
-        //     view_mode = HtmlViewMode::Xml;
-        //     url = url.replace("xml:", "");
-        // }
-        // if url.scheme() == Some("xml") {
-        //     view_mode = HtmlViewMode::Xml;
-        //     url = url.replace("xml:", "");
-        // }
-        //
-        // if url.scheme() == Some("gosub") || url.scheme() == Some("about") {
-        //     url.scheme = None;
-        //     return (HtmlViewMode::About, url);
-        // }
-
-        (view_mode, url)
-    }
 }
 
 impl BrowserWindow {
@@ -303,13 +264,13 @@ impl BrowserWindow {
                         .vexpand(true)
                         .build();
 
-                    if tab.viewmode() == HtmlViewMode::Source {
+                    if tab.render_mode() == GosubRenderMode::Source {
                         let view = create_view_mode("html", tab.content());
                         scrolled_window.set_child(Some(&view));
-                    } else if tab.viewmode() == HtmlViewMode::Xml {
+                    } else if tab.render_mode() == GosubRenderMode::Xml {
                         let view = create_view_mode("xml", tab.content());
                         scrolled_window.set_child(Some(&view));
-                    } else if tab.viewmode() == HtmlViewMode::Json {
+                    } else if tab.render_mode() == GosubRenderMode::Json {
                         let view = create_view_mode("json", tab.content());
                         scrolled_window.set_child(Some(&view));
                     } else if tab.has_drawer() {
@@ -525,19 +486,18 @@ impl BrowserWindow {
     fn load_url_async(&self, tab_id: TabId) {
         let manager = self.tab_manager.lock().unwrap();
         let tab = manager.get_tab(tab_id).unwrap();
-        let url = tab.url().to_string();
-        let view_mode = tab.viewmode();
+        let url = tab.url().clone();
         drop(manager);
 
         let sender_clone = self.get_sender().clone();
         runtime().spawn(async move {
-            if view_mode == HtmlViewMode::About {
-                let html_content = load_about_url(url);
+            if url.scheme() == "about:" {
+                let html_content = load_about_url(url.to_string());
                 sender_clone.send(Message::UrlLoaded(tab_id, html_content)).await.unwrap();
                 return;
             }
 
-            match fetcher::fetch_url_body(&url).await {
+            match fetcher::fetch_url_body(url).await {
                 Ok(content) => {
                     let html_content = String::from_utf8_lossy(content.as_slice());
                     // we get a Cow.. and we clone it into the url?
@@ -581,10 +541,10 @@ impl BrowserWindow {
             Message::LoadUrl(tab_id, url_str) => {
                 self.log(format!("Loading URL: {}", url_str).as_str());
 
-                // Make sure the URL is correct (starts with scheme://, and find the view_mode (source: xml: raw: etc)
-                let (view_mode, url) = self.sanitize_url(&url_str);
-                dbg!(&view_mode);
-                dbg!(&url);
+                let Ok((view_mode, url)) = GosubAddressParser::parse(url_str.as_str()) else {
+                    self.log("Cannot parse URL");
+                    return;
+                };
 
                 // Update information in the given tab with the new url
                 let mut manager = self.tab_manager.lock().unwrap();
@@ -592,9 +552,9 @@ impl BrowserWindow {
 
                 tab.set_favicon(None);
                 tab.set_title(url.as_str());
-                tab.set_url(url.as_str());
+                tab.set_url(url);
                 tab.set_loading(true);
-                tab.set_viewmode(view_mode);
+                tab.set_render_mode(view_mode);
 
                 manager.update_tab(tab_id, &tab);
                 drop(manager);
@@ -638,20 +598,9 @@ impl BrowserWindow {
                 let mut tab = manager.get_tab(tab_id).unwrap().clone();
                 tab.set_content(&html_content);
 
-                let url = if tab.viewmode() == HtmlViewMode::About {
-                    // @todo: this needs to be changed
-                    Url::from_str(format!("about:{}", tab.url()).as_str()).unwrap()
-                } else {
-                    match Url::from_str(tab.url()) {
-                        Ok(url) => url,
-                        Err(e) => {
-                            log::error!("Failed to parse URL: {}", e);
-                            self.log(format!("Failed to parse URL: {}", e).as_str());
-                            return;
-                        }
-                    }
-                };
-                let d = <GosubEngineConfig as HasTreeDrawer>::TreeDrawer::from_source(url, &html_content, TaffyLayouter, false).unwrap();
+                let d =
+                    <GosubEngineConfig as HasTreeDrawer>::TreeDrawer::from_source(tab.url().clone(), &html_content, TaffyLayouter, false)
+                        .unwrap();
                 tab.set_drawer(d);
 
                 // Fetch title from HTML content... poorly..
@@ -705,17 +654,18 @@ impl BrowserWindow {
     /// Opens a new tab at the given position, with the given URL and title. If the position is None,
     /// the tab will be added at the end of the tab-bar.
     fn open_tab(&self, position: Option<usize>, url_str: &str, title: &str) {
-        let (view_mode, url) = self.sanitize_url(url_str);
-        dbg!(&view_mode);
-        dbg!(&url_str);
+        let Ok((render_mode, url)) = GosubAddressParser::parse(url_str) else {
+            self.log("Cannot parse URL");
+            return;
+        };
 
-        let mut tab = GosubTab::new(&url, title);
+        let mut tab = GosubTab::new(url, title);
         let tab_id = tab.id();
 
         // add tab to manager, and notify the tab has changed. This will update the
         // tab-bar during a refresh-tabs call.
         let mut manager = self.tab_manager.lock().unwrap();
-        tab.set_viewmode(view_mode);
+        tab.set_render_mode(render_mode);
         tab.set_loading(true);
         manager.add_tab(tab, position);
         manager.notify_tab_changed(tab_id);

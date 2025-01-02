@@ -153,7 +153,7 @@ impl BrowserWindow {
                 if let Some(tab_id) = page.get_tab_id() {
                     let manager = window_clone.imp().tab_manager.lock().unwrap();
                     let tab = manager.get_tab(tab_id).unwrap();
-                    window_clone.imp().searchbar.set_text(tab.url());
+                    window_clone.imp().searchbar.set_text(tab.url().as_str());
                     drop(manager);
                 }
             }

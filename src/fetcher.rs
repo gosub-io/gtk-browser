@@ -12,8 +12,8 @@ mod gopher;
 #[cfg(feature = "proto-http")]
 mod http;
 
+pub mod address_parser;
 mod async_stream;
-mod address_parser;
 
 #[derive(Error, Debug)]
 pub enum FetcherError {
@@ -171,11 +171,7 @@ pub async fn fetch_favicon(url: &str) -> Vec<u8> {
     }
 }
 
-pub async fn fetch_url_body(url_str: &str) -> Result<Vec<u8>, FetcherError> {
-    let Ok(url) = Url::parse(url_str) else {
-        return Err(FetcherError::InvalidUrl(url_str.to_string()));
-    };
-
+pub async fn fetch_url_body(url: Url) -> Result<Vec<u8>, FetcherError> {
     let fetcher = Fetcher::new(url.clone());
     match fetcher.fetch(url).await {
         // There was a correct response
