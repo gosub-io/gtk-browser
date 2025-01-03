@@ -177,6 +177,14 @@ pub async fn fetch_url_body(url: Url) -> Result<Vec<u8>, FetcherError> {
         // There was a correct response
         Ok(response) => {
             match response {
+                Response::Gopher(gopher_response) => {
+                    let mut body = Vec::new();
+                    for entry in gopher_response.entries {
+                        body.extend_from_slice(entry.display_string.as_bytes());
+                        body.extend_from_slice(b"\r\n");
+                    }
+                    Ok(body)
+                }
                 // It is an HTTP response
                 Response::Http(http_response) => {
                     // It is a 200 OK response
