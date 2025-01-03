@@ -60,7 +60,8 @@ impl BrowserWindow {
         let window_clone = window.clone();
         spawn_future_local(async move {
             let initial_urls = [
-                "https://gosub.io",
+                "gopher://gopher.meulie.net",
+                // "https://gosub.io",
                 // "source:https://httpbin.org/json",
                 // "source:https://gosub.io/test.html",
                 // "https://www.microsoft.com/en-us/",
@@ -152,7 +153,7 @@ impl BrowserWindow {
                 if let Some(tab_id) = page.get_tab_id() {
                     let manager = window_clone.imp().tab_manager.lock().unwrap();
                     let tab = manager.get_tab(tab_id).unwrap();
-                    window_clone.imp().searchbar.set_text(tab.url());
+                    window_clone.imp().searchbar.set_text(tab.url().as_str());
                     drop(manager);
                 }
             }

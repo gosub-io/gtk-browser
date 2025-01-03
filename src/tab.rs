@@ -1,4 +1,5 @@
 use crate::engine::GosubEngineConfig;
+use crate::fetcher::address_parser::GosubRenderMode;
 use gosub_engine::prelude::HasTreeDrawer;
 use gtk4::gdk::Texture;
 use std::collections::{HashMap, VecDeque};
@@ -6,6 +7,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use url::Url;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -42,25 +44,9 @@ impl fmt::Display for TabId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum HtmlViewMode {
-    // Display the url as an about page (if exists)
-    About,
-    /// View the HTML as rendered
-    Rendered,
-    /// View the HTML as syntax highlighted source
-    Source,
-    /// Viewed as raw incoming data without indenting or highlighting
-    RawSource,
-    /// View as XML file
-    Xml,
-    /// View as JSON file
-    Json,
-}
-
 #[derive(Clone)]
 pub struct GosubTab {
-    view_mode: HtmlViewMode,
+    render_mode: GosubRenderMode,
     /// Tab is currently loading
     loading: bool,
     /// Id of the tab
@@ -70,9 +56,9 @@ pub struct GosubTab {
     /// Tab content is private and not saved in history
     private: bool,
     /// URL that is loaded into the tab
-    url: String,
+    url: Url,
     /// History of the tab
-    history: Vec<String>,
+    history: Vec<Url>,
     /// Title of the tab
     title: String,
     /// Loaded favicon of the tab
@@ -93,14 +79,14 @@ impl Debug for GosubTab {
 }
 
 impl GosubTab {
-    pub fn new(url: &str, title: &str) -> Self {
+    pub fn new(url: Url, title: &str) -> Self {
         GosubTab {
-            view_mode: HtmlViewMode::Rendered,
+            render_mode: GosubRenderMode::Rendered,
             loading: false,
             id: TabId::new(),
             pinned: false,
             private: false,
-            url: url.to_string(),
+            url,
             history: Vec::new(),
             title: title.to_string(),
             favicon: None,
@@ -109,11 +95,11 @@ impl GosubTab {
         }
     }
 
-    pub(crate) fn set_viewmode(&mut self, mode: HtmlViewMode) {
-        self.view_mode = mode;
+    pub(crate) fn set_render_mode(&mut self, mode: GosubRenderMode) {
+        self.render_mode = mode;
     }
-    pub(crate) fn viewmode(&self) -> HtmlViewMode {
-        self.view_mode
+    pub(crate) fn render_mode(&self) -> GosubRenderMode {
+        self.render_mode.clone()
     }
 
     pub fn has_drawer(&self) -> bool {
@@ -140,7 +126,7 @@ impl GosubTab {
         self.id
     }
 
-    pub fn url(&self) -> &str {
+    pub fn url(&self) -> &Url {
         &self.url
     }
 
@@ -168,15 +154,15 @@ impl GosubTab {
         &self.content
     }
 
-    pub fn set_url(&mut self, url: &str) {
-        self.url = url.to_string();
+    pub fn set_url(&mut self, url: Url) {
+        self.url = url
     }
 
-    pub fn add_to_history(&mut self, url: &str) {
-        self.history.push(url.to_string());
+    pub fn add_to_history(&mut self, url: Url) {
+        self.history.push(url);
     }
 
-    pub fn pop_history(&mut self) -> Option<String> {
+    pub fn pop_history(&mut self) -> Option<Url> {
         self.history.pop()
     }
 
@@ -389,6 +375,7 @@ impl GosubTabManager {
 #[cfg(test)]
 mod test {
     use super::{GosubTab, GosubTabManager, TabId};
+    use url::Url;
 
     #[test]
     fn test_tab_id() {
@@ -404,11 +391,11 @@ mod test {
     #[test]
     fn test_tab_manager() {
         let mut manager = GosubTabManager::new();
-        let tab = GosubTab::new("about:blank", "New tab");
+        let tab = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab");
         let tab_id = manager.add_tab(tab, None);
 
         assert_eq!(manager.tab_count(), 1);
-        assert_eq!(manager.get_tab(tab_id).unwrap().url(), "about:blank");
+        assert_eq!(manager.get_tab(tab_id).unwrap().url().as_str(), "about:blank");
         assert_eq!(manager.get_tab(tab_id).unwrap().title(), "New tab");
 
         manager.remove_tab(tab_id);
@@ -418,9 +405,9 @@ mod test {
     #[test]
     fn test_tab_manager_remove() {
         let mut manager = GosubTabManager::new();
-        let tab1 = GosubTab::new("about:blank", "New tab 1");
-        let tab2 = GosubTab::new("about:blank", "New tab 2");
-        let tab3 = GosubTab::new("about:blank", "New tab 3");
+        let tab1 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 1");
+        let tab2 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 2");
+        let tab3 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 3");
 
         let tab1_id = manager.add_tab(tab1, None);
         let tab2_id = manager.add_tab(tab2, None);
@@ -436,14 +423,14 @@ mod test {
     #[test]
     fn test_pinned_tabs() {
         let mut manager = GosubTabManager::new();
-        let tab1 = GosubTab::new("about:blank", "New tab 1");
-        let tab2 = GosubTab::new("about:blank", "New tab 2");
-        let mut tab3 = GosubTab::new("about:blank", "New tab 3");
+        let tab1 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 1");
+        let tab2 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 2");
+        let mut tab3 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 3");
         tab3.set_pinned(true);
-        let tab4 = GosubTab::new("about:blank", "New tab 4");
-        let mut tab5 = GosubTab::new("about:blank", "New tab 5");
+        let tab4 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 4");
+        let mut tab5 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 5");
         tab5.set_pinned(true);
-        let tab6 = GosubTab::new("about:blank", "New tab 6");
+        let tab6 = GosubTab::new(Url::parse("about:blank").unwrap(), "New tab 6");
 
         let tab1_id = manager.add_tab(tab1, None);
         let tab2_id = manager.add_tab(tab2, None);

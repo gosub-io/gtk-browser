@@ -1706,6 +1706,7 @@ dependencies = [
  "gosub_engine",
  "gtk-macros",
  "gtk4",
+ "lazy_static",
  "log",
  "once_cell",
  "reqwest",
