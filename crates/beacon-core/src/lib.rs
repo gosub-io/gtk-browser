@@ -20,6 +20,7 @@ pub mod fetch;
 pub mod isolation;
 pub mod locale;
 pub mod not_found_page;
+pub mod page_report;
 pub mod paths;
 pub mod platform;
 pub mod session;

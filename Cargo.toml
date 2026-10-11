@@ -10,16 +10,16 @@ authors = ["Gosub Community <info@gosub.io>"]
 license = "MIT"
 
 [workspace.dependencies]
-gosub_engine = { path = "../gosub-engine/crates/gosub_engine", features = [
+gosub_engine = { path = "../gosub-engine-page-diagnostics/crates/gosub_engine", features = [
     "sqlite_cookie_store",
     "sqlite_places",
     "timing",
 ] }
-gosub_render_pipeline = { path = "../gosub-engine/crates/gosub_render_pipeline" }
-gosub_shared = { path = "../gosub-engine/crates/gosub_shared" }
-gosub_renderer_skia = { path = "../gosub-engine/crates/gosub_renderer_skia" }
-gosub_renderer_vello = { path = "../gosub-engine/crates/gosub_renderer_vello" }
-gosub_fontmanager = { path = "../gosub-engine/crates/gosub_fontmanager" }
+gosub_render_pipeline = { path = "../gosub-engine-page-diagnostics/crates/gosub_render_pipeline" }
+gosub_shared = { path = "../gosub-engine-page-diagnostics/crates/gosub_shared" }
+gosub_renderer_skia = { path = "../gosub-engine-page-diagnostics/crates/gosub_renderer_skia" }
+gosub_renderer_vello = { path = "../gosub-engine-page-diagnostics/crates/gosub_renderer_vello" }
+gosub_fontmanager = { path = "../gosub-engine-page-diagnostics/crates/gosub_fontmanager" }
 
 skia-safe = { version = "0.99.0", features = ["gl"] }
 # gtk4 must match the version the engine's `gtk4` feature pins.

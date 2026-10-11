@@ -142,6 +142,46 @@ mod imp_timing {
     impl ObjectImpl for TimingRow {}
 }
 
+mod imp_report {
+    use gtk4::glib;
+    use gtk4::glib::Properties;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+    use std::cell::RefCell;
+
+    #[derive(Properties, Default)]
+    #[properties(wrapper_type = super::ReportRow)]
+    pub struct ReportRow {
+        /// HTML or CSS.
+        #[property(get, set)]
+        pub section: RefCell<String>,
+        #[property(get, set)]
+        pub kind: RefCell<String>,
+        /// What was dropped, or the parser's error name.
+        #[property(get, set)]
+        pub subject: RefCell<String>,
+        /// Where, as `line:column` or `stylesheet:line`.
+        #[property(get, set)]
+        pub location: RefCell<String>,
+        #[property(get, set)]
+        pub count: RefCell<String>,
+        /// What the row means, shown on hover.
+        #[property(get, set)]
+        pub hint: RefCell<String>,
+        #[property(get, set)]
+        pub css: RefCell<String>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for ReportRow {
+        const NAME: &'static str = "BeaconReportRow";
+        type Type = super::ReportRow;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for ReportRow {}
+}
+
 mod imp_history {
     use gtk4::glib;
     use gtk4::glib::Properties;
@@ -194,6 +234,17 @@ glib::wrapper! {
 glib::wrapper! {
     /// One namespace in the timings table.
     pub struct TimingRow(ObjectSubclass<imp_timing::TimingRow>);
+}
+
+glib::wrapper! {
+    /// One line of the Page report.
+    pub struct ReportRow(ObjectSubclass<imp_report::ReportRow>);
+}
+
+impl Default for ReportRow {
+    fn default() -> Self {
+        glib::Object::new()
+    }
 }
 
 glib::wrapper! {
