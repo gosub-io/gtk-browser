@@ -73,8 +73,8 @@
             </section>
             <section>
                 <item>
-                    <attribute name="label">Developer Tools</attribute>
-                    <attribute name="action">app.dev_tools</attribute>
+                    <attribute name="label">Engine Room</attribute>
+                    <attribute name="action">app.toggle-log</attribute>
                 </item>
             </section>
         </submenu>
@@ -107,11 +107,11 @@
 
             <section>
                 <item>
-                    <attribute name="label">Developer tools</attribute>
+                    <attribute name="label">Engine Room</attribute>
                     <attribute name="action">app.toggle-log</attribute>
                 </item>
                 <submenu>
-                    <attribute name="label">Developer pane</attribute>
+                    <attribute name="label">Open in Engine Room</attribute>
                     <section>
                         <item>
                             <attribute name="label">Log</attribute>

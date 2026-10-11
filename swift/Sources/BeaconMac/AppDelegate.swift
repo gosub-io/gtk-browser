@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(toggleDeveloperTools(_:)):
             // Validation is the hook AppKit gives for "just before this is shown", which is
             // exactly when the title should be decided.
-            item.title = front.isDeveloperPanelOpen ? "Hide Developer Tools" : "Show Developer Tools"
+            item.title = front.isDeveloperPanelOpen ? "Hide Engine Room" : "Show Engine Room"
             return true
         default:
             return true
@@ -359,7 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// A Develop menu, where a Mac browser keeps this. Safari's bindings where they exist:
     /// ⌥⌘I for the inspector, ⌥⌘U for source.
     private func developMenu() -> NSMenuItem {
-        let toggle = item("Show Developer Tools", #selector(toggleDeveloperTools(_:)), "i", [.command, .option])
+        let toggle = item("Show Engine Room", #selector(toggleDeveloperTools(_:)), "i", [.command, .option])
         developToggleItem = toggle
         return submenu("Develop", [
             toggle,

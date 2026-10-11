@@ -133,7 +133,7 @@ that never scrolls away. Back, forward, reload and stop. An address bar that tak
 person would type, completes from history, selects on click and restores on Escape.
 Bookmarks with a favourites bar, downloads through an `NSSavePanel`, per-tab zoom, keyboard
 input to pages, two-finger swipe navigation, pinch to zoom, page and tab context menus, a
-hovered-link overlay, multiple windows, private windows, a developer panel, a Settings
+hovered-link overlay, multiple windows, private windows, an Engine Room (the developer panel), a Settings
 window, session restore, view source, and the About window with the shell's artwork.
 
 Right-click on the page asks the engine what is under the pointer, so the menu offers the
@@ -141,9 +141,9 @@ link, image or text that is actually there rather than whatever the pointer last
 ⌘-click and middle-click open a link in a background tab, ⇧⌘-click in front of you. Press
 and hold Forward to pick a branch when the history has forked.
 
-### Developer panel
+### Engine Room
 
-`⌥⌘I`, or the Develop menu. It docks under the page with four tabs, and its top edge is a
+The developer panel, shown as "Engine Room" in the menus. `⌥⌘I`, or the Develop menu. It docks under the page with four tabs, and its top edge is a
 grab strip: drag it to make the panel taller or shorter.
 
 **Log** (`⌥⌘L`). The browser's own records, from the engine's `log` crate: time, level,
