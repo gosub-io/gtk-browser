@@ -219,11 +219,11 @@ pub const SHORTCUTS: &[Shortcut] = &[
         scope: Scope::Application,
         subtitle: None,
     },
-    // ── Developer and help ──────────────────────────────────────────────
+    // ── Engine Room and help ────────────────────────────────────────────
     Shortcut {
         action: "app.toggle-log",
-        title: "Developer tools",
-        group: "Developer",
+        title: "Engine Room",
+        group: "Engine Room",
         accels: "<Primary><Shift>I <Primary><Shift>L",
         scope: Scope::Window,
         subtitle: None,
@@ -231,7 +231,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut {
         action: "app.show-about",
         title: "About Gosub Beacon",
-        group: "Developer",
+        group: "Help",
         accels: "F1",
         scope: Scope::Application,
         subtitle: None,
@@ -239,7 +239,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut {
         action: "app.show-shortcuts",
         title: "Keyboard shortcuts",
-        group: "Developer",
+        group: "Help",
         accels: "F2",
         scope: Scope::Application,
         subtitle: None,
