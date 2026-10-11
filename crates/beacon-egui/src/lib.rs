@@ -11,6 +11,7 @@ pub mod android;
 mod app;
 mod chrome;
 mod context;
+mod dive;
 mod platform;
 
 use std::sync::OnceLock;

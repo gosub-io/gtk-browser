@@ -63,15 +63,24 @@ impl Dive {
         }
     }
 
+    /// Prompt for a tap rather than a space press: the shell is on a touch screen.
+    pub fn set_touch(&mut self, touch: bool) {
+        if self.canvas.touch() != touch {
+            self.canvas.set_touch(touch);
+            self.dirty = true;
+        }
+    }
+
     /// The view changed size or density. Cheap when nothing changed.
     pub fn resize(&mut self, width: u32, height: u32, scale: f32) {
         let scale = scale.max(0.5);
         if self.canvas.size() == (width, height) && (self.canvas.scale() - scale).abs() < 1e-3 {
             return;
         }
-        let palette = self.canvas.palette();
+        let (palette, touch) = (self.canvas.palette(), self.canvas.touch());
         self.canvas = paint::Canvas::new(width.max(1), height.max(1), scale, self.canvas.order());
         self.canvas.set_palette(palette);
+        self.canvas.set_touch(touch);
         self.game.resize(width as f32 / scale, height as f32 / scale);
         self.dirty = true;
     }
@@ -135,6 +144,18 @@ mod tests {
         assert_eq!(dive.size(), (1280, 960));
         assert_eq!(dive.frame().len(), 1280 * 960 * 4);
         assert_eq!(dive.game().size(), (640.0, 480.0));
+    }
+
+    #[test]
+    fn a_touch_screen_keeps_its_prompt_through_a_resize() {
+        let mut dive = Dive::new(320, 240, 1.0, paint::PixelOrder::Rgba);
+        let space = dive.frame().to_vec();
+        dive.set_touch(true);
+        let tap = dive.frame().to_vec();
+        assert_ne!(space, tap);
+        dive.resize(640, 480, 2.0);
+        dive.resize(320, 240, 1.0);
+        assert_eq!(dive.frame(), tap.as_slice());
     }
 
     #[test]

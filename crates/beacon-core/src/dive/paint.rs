@@ -218,6 +218,8 @@ pub struct Canvas {
     scale: f32,
     order: PixelOrder,
     palette: Palette,
+    /// The input is a finger, so the prompts say tap rather than space.
+    touch: bool,
     pixels: Vec<u8>,
 }
 
@@ -229,6 +231,7 @@ impl Canvas {
             scale: scale.max(0.5),
             order,
             palette: Palette::LIGHT,
+            touch: false,
             pixels: vec![0; (width * height * 4) as usize],
         }
     }
@@ -243,6 +246,14 @@ impl Canvas {
 
     pub fn set_palette(&mut self, palette: Palette) {
         self.palette = palette;
+    }
+
+    pub fn touch(&self) -> bool {
+        self.touch
+    }
+
+    pub fn set_touch(&mut self, touch: bool) {
+        self.touch = touch;
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -930,8 +941,9 @@ impl Canvas {
 
         let score = format!("SCORE {:06}   BEST {:06}", game.score(), game.best());
         self.text(&score, 16.0, 12.0, 2.0, ink);
+        let press = if self.touch { "TAP" } else { "PRESS SPACE" };
         match game.phase() {
-            Phase::Ready => self.text_centered("PRESS SPACE TO DIVE", w / 2.0, h / 2.0 + 60.0, 3.0, message),
+            Phase::Ready => self.text_centered(&format!("{press} TO DIVE"), w / 2.0, h / 2.0 + 60.0, 3.0, message),
             Phase::Sunk => {
                 let what = match game.wreck() {
                     Some(Wreck::Kelp) => "CAUGHT IN THE KELP",
@@ -939,7 +951,7 @@ impl Canvas {
                     Some(Wreck::Bottom) | None => "RAN AGROUND",
                 };
                 self.text_centered(what, w / 2.0, h / 2.0 - 20.0, 4.0, message);
-                self.text_centered("PRESS SPACE TO TRY AGAIN", w / 2.0, h / 2.0 + 30.0, 3.0, message);
+                self.text_centered(&format!("{press} TO TRY AGAIN"), w / 2.0, h / 2.0 + 30.0, 3.0, message);
             }
             Phase::Playing => {}
         }
