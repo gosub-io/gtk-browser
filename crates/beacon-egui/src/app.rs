@@ -79,6 +79,8 @@ struct TabView {
     scroll_y: f32,
     page_height: f32,
     viewport: Option<(u32, u32)>,
+    /// The game, while the tab plays it in place of its page (`gosub://dive`).
+    dive: Option<crate::dive::DiveView>,
 }
 
 pub struct BeaconApp {
@@ -206,6 +208,10 @@ impl BeaconApp {
     fn open_tab(&mut self, url: &str) -> Option<TabId> {
         let (_mode, url) = beacon_core::address_parser::GosubAddressParser::parse(url).ok()?;
 
+        // The game is not an engine page: its tab gets a blank one underneath.
+        let dive = beacon_core::dive::is_dive(&url);
+        let url = if dive { url::Url::parse("gosub://blank").ok()? } else { url };
+
         let mut tab = GosubTab::new(url.clone(), url.as_str());
         let handle = match self.engine.create_tab(self.rt, url.as_str(), Some((1024, 768))) {
             Ok(handle) => handle,
@@ -232,7 +238,56 @@ impl BeaconApp {
             }
             let _ = handle.send(TabCommand::ResumeDrawing { fps: DRAW_FPS }).await;
         });
+        if dive {
+            self.start_dive(tab_id);
+        }
         Some(tab_id)
+    }
+
+    /// Show the game in `tab_id`, over whatever page it has. The game is this frontend's
+    /// alone: core's tab keeps the page's address and title, the engine keeps the page, and
+    /// leaving the game shows it again.
+    fn start_dive(&mut self, tab_id: TabId) {
+        let Some(view) = self.views.get_mut(&tab_id) else { return };
+        view.dive.get_or_insert_with(Default::default);
+        if self.active() == Some(tab_id) {
+            self.address_bar = beacon_core::dive::URL.to_string();
+            self.progress = Default::default();
+            self.fling = None;
+        }
+    }
+
+    /// Leave the game for the page under it. False when `tab_id` was not playing.
+    fn leave_dive(&mut self, tab_id: TabId) -> bool {
+        if self.views.get_mut(&tab_id).and_then(|v| v.dive.take()).is_none() {
+            return false;
+        }
+        if self.active() == Some(tab_id) {
+            if let Some(tab) = self.tabs.lock().unwrap().get_tab(tab_id) {
+                self.address_bar = tab.url().to_string();
+            }
+        }
+        true
+    }
+
+    fn is_diving(&self, tab_id: TabId) -> bool {
+        self.views.get(&tab_id).is_some_and(|v| v.dive.is_some())
+    }
+
+    /// What a tab is called in the strip and the tab list.
+    fn tab_title(&self, tab_id: TabId, tab: &GosubTab) -> String {
+        if self.is_diving(tab_id) {
+            beacon_core::dive::TITLE.to_string()
+        } else if tab.title().is_empty() {
+            tab.url().to_string()
+        } else {
+            tab.title().to_string()
+        }
+    }
+
+    /// Whether the active tab is playing the game.
+    fn diving(&self) -> bool {
+        self.active().is_some_and(|id| self.is_diving(id))
     }
 
     fn active(&self) -> Option<TabId> {
@@ -283,7 +338,9 @@ impl BeaconApp {
         self.progress = Default::default();
         self.tabs.lock().unwrap().mark_active(tab_id);
         self.beacon.mru_mut().touch(tab_id);
-        if let Some(tab) = self.tabs.lock().unwrap().get_tab(tab_id) {
+        if self.is_diving(tab_id) {
+            self.address_bar = beacon_core::dive::URL.to_string();
+        } else if let Some(tab) = self.tabs.lock().unwrap().get_tab(tab_id) {
             self.address_bar = tab.url().to_string();
         }
     }
@@ -334,6 +391,25 @@ impl BeaconApp {
             match self.event_rx.try_recv() {
                 Ok(event) => {
                     log::debug!("engine event: {}", engine_event_name(&event));
+                    // A link to the game (the error page's, the help page's): the engine has
+                    // no such page, so stop its navigation and show the game instead.
+                    if let EngineEvent::Navigation {
+                        tab_id: engine_id,
+                        event: gosub_engine::events::NavigationEvent::Started { url, .. },
+                    } = &event
+                    {
+                        if beacon_core::dive::is_dive(url) {
+                            if let Some(tab_id) = self.beacon.tab_for_engine(*engine_id) {
+                                if let Some(handle) = self.tabs.lock().unwrap().get_tab(tab_id).and_then(|t| t.tab_handle()) {
+                                    self.rt.spawn(async move {
+                                        let _ = handle.send(TabCommand::CancelNavigation).await;
+                                    });
+                                }
+                                self.start_dive(tab_id);
+                            }
+                            continue;
+                        }
+                    }
                     let out = self.beacon.on_engine_event(event);
                     self.absorb(out);
                 }
@@ -348,7 +424,13 @@ impl BeaconApp {
         for event in events {
             match event {
                 BeaconEvent::UrlChanged(tab_id, url) => {
-                    if self.active() == Some(tab_id) {
+                    // The engine committed a page while the game was up: a history step or
+                    // the page's own navigation took the tab elsewhere, and the game goes.
+                    // The blank page under a tab opened on the game arriving is not that.
+                    if url.as_str() != "gosub://blank" {
+                        self.leave_dive(tab_id);
+                    }
+                    if self.active() == Some(tab_id) && !self.is_diving(tab_id) {
                         if !self.address_bar_focused {
                             self.address_bar = url.to_string();
                         }
@@ -377,10 +459,11 @@ impl BeaconApp {
                     self.favicons.forget(tab_id);
                 }
                 BeaconEvent::FaviconChanged(tab_id) => self.favicons.forget(tab_id),
+                BeaconEvent::NavigationFailed(tab_id, url, error) => self.load_error_page(tab_id, &url, &error),
                 // Only the active tab's load is reported. `None` is the load ending, which
                 // runs the bar to the end before it goes.
                 BeaconEvent::LoadProgress(tab_id, fraction) => {
-                    if self.active() == Some(tab_id) {
+                    if self.active() == Some(tab_id) && !self.is_diving(tab_id) {
                         self.progress.set(fraction.map(|f| f as f32));
                     }
                 }
@@ -394,11 +477,31 @@ impl BeaconApp {
                 | BeaconEvent::TitleChanged(..)
                 | BeaconEvent::LoadingChanged(..)
                 | BeaconEvent::NavStateChanged(_)
-                | BeaconEvent::NavigationFailed(..)
                 | BeaconEvent::DownloadOffered { .. }
                 | BeaconEvent::DownloadChanged(_) => {}
             }
         }
+    }
+
+    /// Show the branded error page in a tab whose navigation failed. Stop arrives as a
+    /// cancelled navigation and is not an error.
+    fn load_error_page(&self, tab_id: TabId, url: &url::Url, error: &str) {
+        if beacon_core::error_page::is_cancellation(error) {
+            return;
+        }
+        let Some(handle) = self.tabs.lock().unwrap().get_tab(tab_id).and_then(|t| t.tab_handle()) else {
+            return;
+        };
+        let html = if cfg!(target_os = "android") {
+            beacon_core::error_page::build_for_touch(url.as_str(), error)
+        } else {
+            beacon_core::error_page::build(url.as_str(), error)
+        };
+        let base_url = url.to_string();
+        self.rt.spawn(async move {
+            let _ = handle.send(TabCommand::LoadHtml { html, base_url }).await;
+            let _ = handle.send(TabCommand::ResumeDrawing { fps: DRAW_FPS }).await;
+        });
     }
 
     /// Turn the latest composited frame for `tab_id` into something egui can paint.
@@ -513,6 +616,15 @@ impl eframe::App for BeaconApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::BrowserBack)) {
             self.back_key(&ctx, active);
         }
+        // Space on the page a failed navigation shows starts the game, as in GTK.
+        let showing_error = self.tabs.lock().unwrap().get_tab(active).is_some_and(|t| t.showing_error());
+        if showing_error
+            && !self.address_bar_focused
+            && !self.diving()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+        {
+            self.start_dive(active);
+        }
 
         // The window runs under the status and navigation bars on Android; keep the chrome
         // and the page out from under them. Added first, so they are the outermost panels.
@@ -593,9 +705,9 @@ impl eframe::App for BeaconApp {
                                 continue;
                             };
                             let icon = self.favicons.get(&ctx, tab_id, tab.favicon());
-                            let title = if tab.title().is_empty() { tab.url().as_str() } else { tab.title() };
+                            let title = self.tab_title(tab_id, &tab);
                             let (response, closed) =
-                                chrome::tab(ui, title, icon.as_ref(), tab.is_loading(), Some(tab_id) == self.active(), width);
+                                chrome::tab(ui, &title, icon.as_ref(), tab.is_loading(), Some(tab_id) == self.active(), width);
                             let response = response.on_hover_text(tab.url().as_str());
                             if closed {
                                 action = Some(chrome::TabAction::Close(tab_id));
@@ -627,6 +739,7 @@ impl eframe::App for BeaconApp {
             .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(8, 6)))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    let diving = self.diving();
                     let (can_back, can_forward, loading, url) = {
                         let tabs = self.tabs.lock().unwrap();
                         match tabs.get_tab(active) {
@@ -640,7 +753,7 @@ impl eframe::App for BeaconApp {
                         }
                     };
 
-                    if chrome::tool_button(ui, "\u{23f4}", "Back", can_back).clicked() {
+                    if chrome::tool_button(ui, "\u{23f4}", "Back", can_back || diving).clicked() && !self.leave_dive(active) {
                         self.dispatch(BeaconCommand::Back);
                     }
                     // Compact keeps back and reload; forward, home and the star give their
@@ -648,11 +761,21 @@ impl eframe::App for BeaconApp {
                     if !COMPACT && chrome::tool_button(ui, "\u{23f5}", "Forward", can_forward).clicked() {
                         self.dispatch(BeaconCommand::Forward(None));
                     }
-                    if loading {
+                    if loading && !diving {
                         if chrome::tool_button(ui, "\u{1f5d9}", "Stop", true).clicked() {
                             self.dispatch(BeaconCommand::Stop);
                         }
-                    } else if chrome::tool_button(ui, "\u{21bb}", "Reload", true).clicked() {
+                    } else if chrome::tool_button(ui, "\u{21bb}", "Reload", !diving).clicked() {
+                        // A reload leaves the error page, as in GTK: core keeps the flag
+                        // across a load of the same address, and a page that loads this time
+                        // would otherwise hand its taps (and space) to the game.
+                        {
+                            let mut tabs = self.tabs.lock().unwrap();
+                            if let Some(mut tab) = tabs.get_tab(active) {
+                                tab.set_showing_error(false);
+                                tabs.update_tab(active, &tab);
+                            }
+                        }
                         self.dispatch(BeaconCommand::Reload { ignore_cache: false });
                     }
                     if !COMPACT && chrome::tool_button(ui, "\u{1f3e0}", "Home", true).clicked() {
@@ -780,6 +903,12 @@ impl eframe::App for BeaconApp {
                         height: wanted.1,
                     });
                 }
+            }
+
+            if let Some(dive) = self.views.get_mut(&active).and_then(|v| v.dive.as_mut()) {
+                let rect = ui.available_rect_before_wrap();
+                dive.show(ui, rect, !self.address_bar_focused);
+                return;
             }
 
             let texture = self.views.get(&active).and_then(|view| {
@@ -923,7 +1052,11 @@ impl eframe::App for BeaconApp {
             }
             self.last_pointer = pointer;
 
-            if response.clicked() {
+            // On a phone a tap on the error page starts the game, as space does elsewhere
+            // (the page says so). The page has nothing else to tap.
+            if response.clicked() && cfg!(target_os = "android") && showing_error {
+                self.start_dive(active);
+            } else if response.clicked() {
                 // The click's own position: a finger lifting takes the pointer away with it,
                 // so by now the context may have none.
                 if let Some(pos) = response.interact_pointer_pos() {
@@ -983,6 +1116,7 @@ impl BeaconApp {
             egui::Popup::close_all(ctx);
         } else if self.tab_list_open {
             self.tab_list_open = false;
+        } else if self.leave_dive(active) {
         } else if self
             .tabs
             .lock()
@@ -1035,12 +1169,13 @@ impl BeaconApp {
                                 continue;
                             };
                             let icon = self.favicons.get(ctx, tab_id, tab.favicon());
-                            let title = if tab.title().is_empty() { tab.url().as_str() } else { tab.title() };
+                            let title = self.tab_title(tab_id, &tab);
                             let thumbnail = self.views.get(&tab_id).and_then(|view| {
                                 let texture = view
-                                    .gpu_texture
+                                    .dive
                                     .as_ref()
-                                    .map(|(_, id)| *id)
+                                    .and_then(|d| d.texture())
+                                    .or_else(|| view.gpu_texture.as_ref().map(|(_, id)| *id))
                                     .or_else(|| view.cpu_texture.as_ref().map(|t| t.id()))?;
                                 let (w, h) = view.viewport?;
                                 Some(chrome::Thumbnail {
@@ -1049,7 +1184,7 @@ impl BeaconApp {
                                 })
                             });
                             let active = Some(tab_id) == self.active();
-                            let (response, closed) = chrome::tab_card(ui, title, icon.as_ref(), thumbnail, active, width);
+                            let (response, closed) = chrome::tab_card(ui, &title, icon.as_ref(), thumbnail, active, width);
                             if closed {
                                 action = Some(chrome::TabAction::Close(tab_id));
                             } else if response.clicked() {
@@ -1081,6 +1216,14 @@ impl BeaconApp {
             return;
         };
         let Some(active) = self.active() else { return };
+        if beacon_core::dive::is_dive(&url) {
+            self.start_dive(active);
+            return;
+        }
+        // Going somewhere from the game goes from the page under it.
+        if let Some(view) = self.views.get_mut(&active) {
+            view.dive = None;
+        }
         {
             let mut tabs = self.tabs.lock().unwrap();
             if let Some(mut tab) = tabs.get_tab(active) {

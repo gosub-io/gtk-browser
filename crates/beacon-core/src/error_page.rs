@@ -16,9 +16,20 @@ fn escape(text: &str) -> String {
 
 /// The error page for a failed navigation to `url`.
 pub fn build(url: &str, error: &str) -> String {
+    page(url, error, "press space")
+}
+
+/// The error page for a shell on a touch screen, where a tap on the page starts the game:
+/// there is no space bar to press.
+pub fn build_for_touch(url: &str, error: &str) -> String {
+    page(url, error, "tap the page")
+}
+
+fn page(url: &str, error: &str, dive: &str) -> String {
     include_str!("../resources/error.html")
         .replace("{{URL}}", &escape(url))
         .replace("{{ERROR}}", &escape(error))
+        .replace("{{DIVE}}", dive)
 }
 
 /// Whether a failure is worth showing a page for.
@@ -50,6 +61,12 @@ mod tests {
         assert!(!page.contains("<script>"));
         assert!(!page.contains("<img onerror=x>"));
         assert!(page.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn the_game_hint_names_the_input_there_is() {
+        assert!(build("https://example.test/", "x").contains("Or press space and dive"));
+        assert!(build_for_touch("https://example.test/", "x").contains("Or tap the page and dive"));
     }
 
     #[test]
