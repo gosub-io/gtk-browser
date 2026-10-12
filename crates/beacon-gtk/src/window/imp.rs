@@ -111,6 +111,8 @@ pub struct BrowserWindow {
     #[template_child]
     pub history_list: TemplateChild<gtk4::ColumnView>,
     #[template_child]
+    pub report_list: TemplateChild<gtk4::ColumnView>,
+    #[template_child]
     pub network_scroller: TemplateChild<ScrolledWindow>,
     #[template_child]
     pub network_list: TemplateChild<gtk4::ColumnView>,
@@ -143,6 +145,8 @@ pub struct BrowserWindow {
     pub timings_model: gtk4::gio::ListStore,
     /// The history tree's lines, updated in place like the others'.
     pub history_model: gtk4::gio::ListStore,
+    /// The Page report's lines, updated in place like the others'.
+    pub report_model: gtk4::gio::ListStore,
     /// The rows the network table is showing, in order. Held rather than rebuilt: a refresh
     /// writes new values into the objects already here, and the view updates the labels it
     /// has bound to them. Rows are only added or removed when the request list really
@@ -273,6 +277,7 @@ impl Default for BrowserWindow {
             timings_scroller: TemplateChild::default(),
             timings_list: TemplateChild::default(),
             history_list: TemplateChild::default(),
+            report_list: TemplateChild::default(),
             network_scroller: TemplateChild::default(),
             network_list: TemplateChild::default(),
             network_detail_stack: TemplateChild::default(),
@@ -292,6 +297,7 @@ impl Default for BrowserWindow {
             network_selection: gtk4::SingleSelection::builder().autoselect(false).can_unselect(true).build(),
             timings_model: gtk4::gio::ListStore::new::<super::rows::TimingRow>(),
             history_model: gtk4::gio::ListStore::new::<super::rows::HistoryRow>(),
+            report_model: gtk4::gio::ListStore::new::<super::rows::ReportRow>(),
             detail_rendered: RefCell::new(std::collections::HashMap::new()),
             devtools_tick: RefCell::new(None),
             devtools_height: Cell::new(260),
@@ -786,6 +792,7 @@ impl BrowserWindow {
         self.build_log_columns();
         self.build_timings_columns();
         self.build_history_columns();
+        self.build_report_columns();
 
         // Selecting a request shows it in full. The row object carries the id, so a refresh
         // that reorders or trims the list cannot leave the detail pane on the wrong request.
@@ -822,8 +829,11 @@ impl BrowserWindow {
             imp.devtools_action.set_tooltip_text(Some(tooltip));
             // Nothing to clear or filter on a page with nothing on it. History has content but
             // neither: the engine owns it, and a filter would cut the branches it is drawn from.
-            let has_content = !matches!(imp.devtools_page().as_str(), "console" | "history");
-            imp.devtools_action.set_visible(has_content);
+            // The Page report filters, but is the engine's account of the page, not a log to
+            // clear: it is replaced by the next navigation's.
+            let page = imp.devtools_page();
+            let has_content = !matches!(page.as_str(), "console" | "history");
+            imp.devtools_action.set_visible(has_content && page != "report");
             imp.devtools_filter.set_visible(has_content);
             imp.refresh_devtools();
         });
@@ -845,6 +855,7 @@ impl BrowserWindow {
             "timings" => self.refresh_timings(&needle),
             "network" => self.refresh_network(&needle),
             "history" => self.refresh_history(),
+            "report" => self.refresh_report(&needle),
             // The page's own console, which has nothing to say until scripts run. Its
             // summary line would otherwise keep whatever the last page put there.
             "console" => self.devtools_summary.set_text(""),
@@ -978,6 +989,80 @@ impl BrowserWindow {
                 _ => Self::text_column(title, property, width, xalign),
             };
             self.timings_list.append_column(&column);
+        }
+    }
+
+    // ── page report ───────────────────────────────────────────────────────
+
+    /// The Page report's columns: what kind of problem, what it was, where, how often.
+    fn build_report_columns(&self) {
+        self.report_list
+            .set_model(Some(&gtk4::NoSelection::new(Some(self.report_model.clone()))));
+        for (title, property, width, xalign) in [
+            ("", "section", Some(56), 0.0),
+            ("Kind", "kind", Some(170), 0.0),
+            ("What", "subject", None, 0.0),
+            ("Where", "location", Some(200), 0.0),
+            ("Count", "count", Some(64), 1.0),
+        ] {
+            let column = Self::text_column(title, property, width, xalign);
+            if property == "subject" {
+                column.set_expand(true);
+            }
+            column.set_resizable(true);
+            self.report_list.append_column(&column);
+        }
+    }
+
+    /// The active tab's report, filtered by kind, subject or location.
+    fn refresh_report(&self, needle: &str) {
+        use beacon_core::page_report::{self, Report};
+
+        let rows = match self.active_tab_id().and_then(page_report::report) {
+            Some(Report::Ready(diagnostics)) => {
+                self.devtools_summary.set_text(&page_report::summary(&diagnostics));
+                page_report::rows(&diagnostics)
+            }
+            Some(Report::Waiting) => {
+                self.devtools_summary.set_text("Waiting for the page's first frame");
+                Vec::new()
+            }
+            None => {
+                self.devtools_summary.set_text("No page loaded");
+                Vec::new()
+            }
+        };
+        let rows: Vec<_> = rows
+            .iter()
+            .filter(|row| {
+                needle.is_empty()
+                    || row.kind.to_lowercase().contains(needle)
+                    || row.subject.to_lowercase().contains(needle)
+                    || row.location.to_lowercase().contains(needle)
+            })
+            .collect();
+
+        for (index, row) in rows.iter().enumerate() {
+            let item = match self.report_model.item(index as u32).and_downcast::<super::rows::ReportRow>() {
+                Some(item) => item,
+                None => {
+                    let item = super::rows::ReportRow::default();
+                    self.report_model.append(&item);
+                    item
+                }
+            };
+            set_changed!(item, section, set_section, row.section.label());
+            set_changed!(item, kind, set_kind, row.kind);
+            set_changed!(item, subject, set_subject, row.subject.as_str());
+            set_changed!(item, location, set_location, row.location.as_str());
+            set_changed!(item, count, set_count, row.count.to_string());
+            set_changed!(item, hint, set_hint, row.hint);
+            set_changed!(item, css, set_css, "monospace");
+        }
+        let wanted = rows.len() as u32;
+        if self.report_model.n_items() > wanted {
+            self.report_model
+                .splice(wanted, self.report_model.n_items() - wanted, &[] as &[super::rows::ReportRow]);
         }
     }
 
@@ -1328,8 +1413,12 @@ impl BrowserWindow {
             let mut bindings = vec![row.bind_property(property, &label, "label").sync_create().build()];
             // Text wider than its column is still readable on hover. A column of numbers has
             // nothing to add, so only the ones that can overflow get a tooltip.
-            if matches!(property, "url" | "message" | "target") {
+            if matches!(property, "url" | "message" | "target" | "subject" | "location") {
                 bindings.push(row.bind_property(property, &label, "tooltip-text").sync_create().build());
+            }
+            // A Page report row's kind says what it means on hover.
+            if property == "kind" {
+                bindings.push(row.bind_property("hint", &label, "tooltip-text").sync_create().build());
             }
             bindings.push(
                 row.bind_property("css", &label, "css-classes")

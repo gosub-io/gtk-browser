@@ -129,6 +129,11 @@
                             <attribute name="target">network</attribute>
                         </item>
                         <item>
+                            <attribute name="label">Page Report</attribute>
+                            <attribute name="action">app.devtools-page</attribute>
+                            <attribute name="target">report</attribute>
+                        </item>
+                        <item>
                             <attribute name="label">Timings</attribute>
                             <attribute name="action">app.devtools-page</attribute>
                             <attribute name="target">timings</attribute>

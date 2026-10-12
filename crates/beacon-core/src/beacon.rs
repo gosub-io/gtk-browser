@@ -193,7 +193,9 @@ impl Beacon {
     }
 
     pub fn unbind_engine_tab(&mut self, engine_id: EngineTabId) {
-        self.engine_tabs.remove(&engine_id);
+        if let Some(tab) = self.engine_tabs.remove(&engine_id) {
+            crate::page_report::forget(tab);
+        }
     }
 
     /// Our tab id for an engine tab, if we still have one. Events for tabs we have already
@@ -400,6 +402,7 @@ impl Beacon {
             // back/forward. Only the ones started here were marked loading before, so a tapped
             // link loaded under a Reload button.
             NavigationEvent::Started { url, .. } => {
+                crate::page_report::navigation_started(our_id);
                 // Leaving for another address leaves the error page behind. The error
                 // page itself arrives as a load of the failed address (the shell's
                 // `LoadHtml` at that base URL), and a reload of it keeps the address
@@ -511,6 +514,12 @@ impl Beacon {
                 out.push(BeaconEvent::TabsChanged);
                 out.push(BeaconEvent::NavStateChanged(our_id));
                 out
+            }
+
+            // Read by the Page report on its own refresh; nothing else changes.
+            NavigationEvent::Diagnostics { diagnostics, .. } => {
+                crate::page_report::record(our_id, diagnostics);
+                Vec::new()
             }
 
             _ => Vec::new(),
