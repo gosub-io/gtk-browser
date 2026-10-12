@@ -344,6 +344,16 @@ typedef enum {
     BEACON_PHASE_DONE = 5
 } BeaconRequestPhase;
 
+/* What the HTTP cache did with a hop. 0 is "nothing reported". */
+typedef enum {
+    BEACON_CACHE_NONE = 0,
+    BEACON_CACHE_HIT = 1,          /* used a stored response without contacting the server */
+    BEACON_CACHE_VALIDATED = 2,    /* revalidated: the server answered 304                 */
+    BEACON_CACHE_STORED = 3,       /* the network's response was written to the cache      */
+    BEACON_CACHE_INVALIDATED = 4,  /* stored responses for the URL were dropped            */
+    BEACON_CACHE_OTHER = 5         /* an outcome this build does not know                  */
+} BeaconCacheOutcome;
+
 typedef struct {
     uint64_t started_ms;      /* first seen, ms since the epoch; rows are in this order   */
     uint64_t received_bytes;
@@ -361,6 +371,16 @@ typedef struct {
     bool has_body;
     bool body_truncated;      /* the response continued past the captured preview         */
     bool body_evicted;        /* captured, then dropped for budget -- say so, it differs  */
+    /* How the cache answered the hop the row ends on: HIT, VALIDATED, or NONE when the bytes
+     * came from the network. What a status column marks as "(cache)". */
+    BeaconCacheOutcome cache_answer;
+    /* How many entries each detail list holds, for the indexed getters below. */
+    size_t cache_count;
+    size_t auth_count;
+    size_t upgrade_count;
+    size_t change_count;
+    size_t retry_count;
+    size_t preflight_count;
 } BeaconRequest;
 
 /* Copy the requests for `tab` -- or every tab when it is 0 -- and return how many. */
@@ -399,6 +419,11 @@ char *beacon_net_failure_hint(BeaconBrowser *browser, size_t index);
  * failure is precise enough to say -- today, a CORS refusal. NULL otherwise. */
 char *beacon_net_failure_fix(BeaconBrowser *browser, size_t index);
 char *beacon_net_failure_spec(BeaconBrowser *browser, size_t index);
+/* For a failed TLS handshake: the host, and the SHA-256 fingerprint of the certificate it was
+ * shown as "AB:CD:...". NULL for any other failure, and the fingerprint is NULL when the
+ * server never presented a certificate. */
+char *beacon_net_tls_host(BeaconBrowser *browser, size_t index);
+char *beacon_net_tls_fingerprint(BeaconBrowser *browser, size_t index);
 /* The captured body, decoded for display. NULL when none was captured: check body_evicted
  * to tell "dropped to stay in budget" from "never taken". */
 char *beacon_net_body_text(BeaconBrowser *browser, size_t index);
@@ -409,6 +434,36 @@ char *beacon_net_response_header_name(BeaconBrowser *browser, size_t index, size
 char *beacon_net_response_header_value(BeaconBrowser *browser, size_t index, size_t header);
 uint32_t beacon_net_redirect_status(BeaconBrowser *browser, size_t index, size_t hop);
 char *beacon_net_redirect_url(BeaconBrowser *browser, size_t index, size_t hop);
+
+/* What happened to a request beyond sending it, one list each, read by `entry` up to the
+ * matching *_count in BeaconRequest. Strings free with beacon_string_free and are NULL out of
+ * range; numbers are 0, false, BEACON_CACHE_NONE or BEACON_ABSENT out of range. */
+BeaconCacheOutcome beacon_net_cache_outcome(BeaconBrowser *browser, size_t index, size_t entry);
+char *beacon_net_cache_label(BeaconBrowser *browser, size_t index, size_t entry);  /* "served from cache" */
+char *beacon_net_cache_url(BeaconBrowser *browser, size_t index, size_t entry);
+/* Each 401 or 407: the hop, its challenges as one line (Basic realm="staff", Bearer),
+ * whether a proxy asked, and whether the hop was sent again with credentials. */
+char *beacon_net_auth_url(BeaconBrowser *browser, size_t index, size_t entry);
+char *beacon_net_auth_challenges(BeaconBrowser *browser, size_t index, size_t entry);
+bool beacon_net_auth_is_proxy(BeaconBrowser *browser, size_t index, size_t entry);
+bool beacon_net_auth_retried(BeaconBrowser *browser, size_t index, size_t entry);
+/* Hops rewritten from http to https before they were sent, and why ("HSTS"). */
+char *beacon_net_upgrade_from(BeaconBrowser *browser, size_t index, size_t entry);
+char *beacon_net_upgrade_to(BeaconBrowser *browser, size_t index, size_t entry);
+char *beacon_net_upgrade_reason(BeaconBrowser *browser, size_t index, size_t entry);
+/* What a policy changed instead of refusing the request: a trimmed Referer, withheld
+ * cookies, a stripped header. Most leave no trace in the response. */
+char *beacon_net_change_url(BeaconBrowser *browser, size_t index, size_t entry);
+char *beacon_net_change_label(BeaconBrowser *browser, size_t index, size_t entry);
+/* Attempts that failed and were made again. The row's timings and response are the latest
+ * attempt's. */
+uint32_t beacon_net_retry_attempt(BeaconBrowser *browser, size_t index, size_t entry);  /* from 1 */
+uint64_t beacon_net_retry_delay_us(BeaconBrowser *browser, size_t index, size_t entry);
+char *beacon_net_retry_reason(BeaconBrowser *browser, size_t index, size_t entry);
+/* CORS preflights: the hop, and how long the OPTIONS took -- BEACON_ABSENT while it is out
+ * or when it failed outright. */
+char *beacon_net_preflight_url(BeaconBrowser *browser, size_t index, size_t entry);
+uint64_t beacon_net_preflight_us(BeaconBrowser *browser, size_t index, size_t entry);
 
 /* ── what is under the pointer ─────────────────────────────────────────────── */
 

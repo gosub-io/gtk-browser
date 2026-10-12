@@ -282,6 +282,95 @@ pub struct NetRequest {
     /// server and reading the body, which is the whole point of a waterfall: a row that is
     /// mostly wait is a slow server, one that is mostly body is a big file.
     pub headers_ms: Option<u64>,
+    /// What the HTTP cache did, one entry per outcome reported, with the hop's URL. A hop can
+    /// have more than one: a revalidated response is also written back.
+    pub cache: Vec<(String, gosub_engine::events::CacheOutcome)>,
+    /// Every `401`/`407` a hop was answered with.
+    pub auth: Vec<AuthSeen>,
+    /// Hops rewritten from `http` to `https` before they were sent.
+    pub upgrades: Vec<Upgrade>,
+    /// What a policy changed instead of refusing, with the hop's URL. Most of these leave no
+    /// trace in the response, which is why they are worth listing.
+    pub changes: Vec<(String, gosub_engine::events::RequestChange)>,
+    /// Attempts that failed and were made again, oldest first.
+    pub retries: Vec<Retry>,
+    /// CORS preflights sent for this request, one per hop that needed one.
+    pub preflights: Vec<Preflight>,
+}
+
+/// One `401` or `407`, and whether the stack answered it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthSeen {
+    /// The challenged hop.
+    pub url: String,
+    pub target: gosub_engine::events::AuthTarget,
+    /// Scheme and realm of each challenge offered. Empty when the header was missing or did
+    /// not parse, which is itself worth showing.
+    pub challenges: Vec<gosub_engine::events::AuthChallenge>,
+    /// Whether the hop was sent again with credentials. `false` means the `401`/`407` is the
+    /// response the page got.
+    pub retried: bool,
+}
+
+impl AuthSeen {
+    /// The challenges as one line, `Basic realm="staff", Bearer`, or a note that there was
+    /// none the stack could read.
+    pub fn challenges_label(&self) -> String {
+        if self.challenges.is_empty() {
+            return "no challenge it could read".to_string();
+        }
+        self.challenges
+            .iter()
+            .map(|c| match &c.realm {
+                Some(realm) => format!("{} realm=\"{realm}\"", c.scheme),
+                None => c.scheme.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// One hop rewritten from `http` to `https`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Upgrade {
+    pub from: String,
+    pub to: String,
+    pub reason: gosub_engine::events::UpgradeReason,
+}
+
+/// One failed attempt that the stack made again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Retry {
+    /// Which retry this is, from 1.
+    pub attempt: u32,
+    /// How long the stack waited before sending it again.
+    pub delay_us: u64,
+    /// Why the attempt before it failed, in the stack's words.
+    pub reason: String,
+}
+
+/// One CORS preflight `OPTIONS`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Preflight {
+    /// The hop it asked permission for.
+    pub url: String,
+    /// How long it took, once its response arrived. `None` while it is out, and for one that
+    /// failed outright: the engine reports nothing more for those, and the request's own
+    /// failure says why.
+    pub elapsed_us: Option<u64>,
+}
+
+/// How many entries each of the per-request detail lists keeps. Generous for one request:
+/// a redirect chain is capped well below this, and a request retried this often has
+/// stopped being interesting entry by entry.
+const DETAIL_CAP: usize = 32;
+
+/// Append to a detail list, dropping the oldest entry once it is full.
+fn push_capped<T>(list: &mut Vec<T>, item: T) {
+    if list.len() >= DETAIL_CAP {
+        list.remove(0);
+    }
+    list.push(item);
 }
 
 impl NetRequest {
@@ -305,6 +394,51 @@ impl NetRequest {
                     Phase::Opening
                 }
             }
+        }
+    }
+
+    /// How the cache answered the hop this row ends on, when it answered at all: a
+    /// [`CacheOutcome::Hit`] sent nothing, a [`CacheOutcome::Validated`] sent a conditional
+    /// request and got `304`. `None` when the bytes came from the network, including a
+    /// response the cache merely stored on the way past.
+    ///
+    /// [`CacheOutcome::Hit`]: gosub_engine::events::CacheOutcome::Hit
+    /// [`CacheOutcome::Validated`]: gosub_engine::events::CacheOutcome::Validated
+    pub fn cache_answer(&self) -> Option<gosub_engine::events::CacheOutcome> {
+        use gosub_engine::events::CacheOutcome;
+        self.cache
+            .iter()
+            .rev()
+            .filter(|(url, _)| *url == self.url)
+            .map(|(_, outcome)| *outcome)
+            .find(|outcome| matches!(outcome, CacheOutcome::Hit | CacheOutcome::Validated))
+    }
+
+    /// Why the TLS handshake failed, when it did.
+    pub fn tls_kind(&self) -> Option<gosub_engine::events::TlsFailureKind> {
+        match self.failure.as_ref()? {
+            gosub_engine::events::LoadError::Tls { kind, .. } => Some(*kind),
+            _ => None,
+        }
+    }
+
+    /// The host a failed TLS handshake was with.
+    pub fn tls_host(&self) -> Option<&str> {
+        match self.failure.as_ref()? {
+            gosub_engine::events::LoadError::Tls { host, .. } => Some(host),
+            _ => None,
+        }
+    }
+
+    /// The SHA-256 fingerprint of the certificate a failed handshake was shown, written the way
+    /// browsers show it, so it can be compared against one.
+    pub fn tls_fingerprint(&self) -> Option<String> {
+        match self.failure.as_ref()? {
+            gosub_engine::events::LoadError::Tls {
+                fingerprint: Some(fingerprint),
+                ..
+            } => Some(format_fingerprint(fingerprint)),
+            _ => None,
         }
     }
 
@@ -340,7 +474,7 @@ impl NetRequest {
         Some(match self.failure.as_ref()? {
             LoadError::Blocked { .. } => "refused by policy before it was sent -- mixed content, CORS, or a URL the embedder disallows",
             LoadError::InvalidUrl { .. } => "the URL did not parse",
-            LoadError::Tls { .. } => "the TLS handshake failed: an expired, untrusted or mismatched certificate",
+            LoadError::Tls { .. } => "the TLS handshake failed, for a reason the network stack did not classify",
             LoadError::Timeout { .. } => "no answer within the time limit",
             LoadError::Connect { .. } => "no connection was established: the name did not resolve, or nothing accepted it",
             LoadError::Transfer { .. } => "the connection worked and then broke part way through",
@@ -392,9 +526,69 @@ impl NetRequest {
             LoadError::Blocked {
                 reason: BlockReason::Cors(failure),
             } => explain_cors(*failure),
+            LoadError::Tls { kind, .. } => explain_tls(*kind),
             _ => None,
         }
     }
+}
+
+/// A certificate fingerprint as colon-separated uppercase hex pairs, `AB:CD:...`, which is how
+/// browsers and `openssl x509 -fingerprint` print one.
+pub fn format_fingerprint(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
+}
+
+/// One way a TLS handshake fails, explained. `None` for a kind this build has no words for,
+/// [`TlsFailureKind::Other`] included: the panel then falls back to the stack's own message.
+///
+/// [`TlsFailureKind::Other`]: gosub_engine::events::TlsFailureKind::Other
+pub fn explain_tls(kind: gosub_engine::events::TlsFailureKind) -> Option<Explanation> {
+    use gosub_engine::events::TlsFailureKind::*;
+    // A section of an RFC, by its anchor.
+    macro_rules! rfc {
+        ($number:literal, $section:literal) => {
+            concat!("https://www.rfc-editor.org/rfc/rfc", $number, "#section-", $section)
+        };
+    }
+    let (what, fix, spec) = match kind {
+        Expired => (
+            "the server's certificate has expired, or this machine's clock is set later than it should be",
+            "renew the certificate on the server; if it is still in date, check this machine's clock",
+            rfc!("5280", "4.1.2.5"),
+        ),
+        NotYetValid => (
+            "the server's certificate is not valid yet, or this machine's clock is set earlier than it should be",
+            "check this machine's clock first; otherwise the server is using a certificate issued for a later date",
+            rfc!("5280", "4.1.2.5"),
+        ),
+        UnknownIssuer => (
+            "the certificate does not chain to an authority this browser trusts: it is self-signed, from a private CA, or the server left out an intermediate",
+            "have the server send the full chain including intermediates, or use a certificate from a public CA; for a private CA, add its root to the trust store",
+            rfc!("5280", "6.1"),
+        ),
+        HostnameMismatch => (
+            "the certificate is valid, but not for this host name",
+            "serve a certificate whose subject alternative names include this host, or use the host name the certificate was issued for",
+            rfc!("9525", "6"),
+        ),
+        Revoked => (
+            "the authority that issued the certificate has revoked it",
+            "the server needs a new certificate; a revoked one cannot be trusted again",
+            rfc!("5280", "6.3"),
+        ),
+        InvalidCertificate => (
+            "the certificate could not be used: it is malformed, signed with a rejected algorithm, or not issued for serving websites",
+            "reissue the certificate with a current signature algorithm and the serverAuth extended key usage",
+            rfc!("5280", "4"),
+        ),
+        Handshake => (
+            "the connection was refused before any certificate was checked: no TLS version or cipher suite both sides support, or the server sent an alert",
+            "enable TLS 1.2 or 1.3 and a current cipher suite on the server, and check its logs for why it sent the alert",
+            rfc!("8446", "6"),
+        ),
+        _ => return None,
+    };
+    Some(Explanation { what, fix, spec })
 }
 
 /// A refusal taken apart: what happened, what would fix it, and the rule behind it.
@@ -541,6 +735,12 @@ pub fn record_resource(tab: Option<crate::tab::TabId>, event: &gosub_engine::eve
             connect_us: None,
             headers_ms: None,
             started_ms: now_ms(),
+            cache: Vec::new(),
+            auth: Vec::new(),
+            upgrades: Vec::new(),
+            changes: Vec::new(),
+            retries: Vec::new(),
+            preflights: Vec::new(),
         });
         requests.last_mut().expect("just pushed")
     }
@@ -656,6 +856,129 @@ pub fn record_resource(tab: Option<crate::tab::TabId>, event: &gosub_engine::eve
             let entry = row(&mut requests, request_id.0, url, tab);
             entry.error = Some(format!("{reason:?}"));
             entry.state = RequestState::Cancelled;
+        }
+        ResourceEvent::Cache {
+            request_id, url, outcome, ..
+        } => {
+            let entry = row(&mut requests, request_id.0, url, tab);
+            push_capped(&mut entry.cache, (url.clone(), *outcome));
+        }
+        ResourceEvent::AuthRequired {
+            request_id,
+            url,
+            target,
+            challenges,
+            retried,
+            ..
+        } => {
+            let entry = row(&mut requests, request_id.0, url, tab);
+            push_capped(
+                &mut entry.auth,
+                AuthSeen {
+                    url: url.clone(),
+                    target: *target,
+                    challenges: challenges.clone(),
+                    retried: *retried,
+                },
+            );
+        }
+        ResourceEvent::SecurityUpgraded {
+            request_id,
+            from,
+            to,
+            reason,
+            ..
+        } => {
+            let entry = row(&mut requests, request_id.0, to, tab);
+            // The upgraded URL is the one that goes out, as after a redirect: what the
+            // cache or the server answers from here is for `to`.
+            entry.url = to.clone();
+            push_capped(
+                &mut entry.upgrades,
+                Upgrade {
+                    from: from.clone(),
+                    to: to.clone(),
+                    reason: *reason,
+                },
+            );
+        }
+        ResourceEvent::RequestModified {
+            request_id, url, change, ..
+        } => {
+            let entry = row(&mut requests, request_id.0, url, tab);
+            push_capped(&mut entry.changes, (url.clone(), change.clone()));
+        }
+        ResourceEvent::Retrying {
+            request_id,
+            url,
+            attempt,
+            delay,
+            reason,
+            ..
+        } => {
+            let entry = row(&mut requests, request_id.0, url, tab);
+            push_capped(
+                &mut entry.retries,
+                Retry {
+                    attempt: *attempt,
+                    delay_us: delay.as_micros() as u64,
+                    reason: reason.clone(),
+                },
+            );
+            // The attempt that failed has already reported its own `Failed`, and a new
+            // `Started` follows. The row describes the attempt in flight, so everything the
+            // failed attempt reported about the wire is dropped here: its failure (the reason
+            // is kept in the retry entry, and a row left marked failed would show red while
+            // the next attempt runs), its request line, its timings and its response. What
+            // the request as a whole went through is kept: the redirects, cache outcomes,
+            // auth challenges, upgrades, policy changes and preflights, and `started_ms`,
+            // so the row keeps its place and the waterfall shows the whole wait including
+            // the back-off.
+            entry.state = RequestState::Queued;
+            entry.error = None;
+            entry.failure = None;
+            entry.status = None;
+            entry.method = None;
+            entry.request_headers.clear();
+            entry.headers.clear();
+            entry.content_type = None;
+            entry.content_length = None;
+            entry.received_bytes = 0;
+            entry.elapsed_us = None;
+            entry.dns_us = None;
+            entry.connect_us = None;
+            entry.headers_ms = None;
+            entry.body = None;
+            entry.body_truncated = false;
+            entry.body_evicted = false;
+        }
+        ResourceEvent::CorsPreflight { request_id, url, .. } => {
+            let entry = row(&mut requests, request_id.0, url, tab);
+            push_capped(
+                &mut entry.preflights,
+                Preflight {
+                    url: url.clone(),
+                    elapsed_us: None,
+                },
+            );
+        }
+        ResourceEvent::CorsPreflightDone {
+            request_id, url, elapsed, ..
+        } => {
+            let entry = row(&mut requests, request_id.0, url, tab);
+            let elapsed_us = Some(elapsed.as_micros() as u64);
+            // Matched to the preflight still out for the same hop. One that arrives without
+            // its start (events can arrive out of order) gets an entry of its own.
+            match entry.preflights.iter_mut().rev().find(|p| p.url == *url && p.elapsed_us.is_none()) {
+                Some(preflight) => preflight.elapsed_us = elapsed_us,
+                None => push_capped(
+                    &mut entry.preflights,
+                    Preflight {
+                        url: url.clone(),
+                        elapsed_us,
+                    },
+                ),
+            }
         }
         // The engine adds events as its network stack learns to report more; the panel
         // shows what it knows about.
@@ -888,6 +1211,12 @@ mod tests {
                 body_evicted: false,
                 redirects: Vec::new(),
                 started_ms: i as u64,
+                cache: Vec::new(),
+                auth: Vec::new(),
+                upgrades: Vec::new(),
+                changes: Vec::new(),
+                retries: Vec::new(),
+                preflights: Vec::new(),
             })
             .collect()
     }
@@ -1003,11 +1332,15 @@ mod tests {
         assert_eq!(row.failure_label(), None);
 
         row.failure = Some(gosub_engine::events::LoadError::Tls {
-            message: "certificate expired".into(),
+            kind: gosub_engine::events::TlsFailureKind::Other,
+            host: "example.test".into(),
+            fingerprint: None,
+            message: "something went wrong".into(),
         });
         assert_eq!(row.failure_label(), Some("TLS"));
         assert!(row.failure_hint().is_some());
-        // A TLS failure has no rule precise enough to name a fix, and no CORS evidence.
+        // A TLS failure the stack could not classify has no rule precise enough to name a
+        // fix, and no CORS evidence.
         assert_eq!(row.failure_fix(), None);
         assert!(row.cors_evidence().is_empty());
     }
@@ -1068,5 +1401,372 @@ mod tests {
             let explained = explain_cors(failure).unwrap_or_else(|| panic!("{failure:?} has no explanation"));
             assert!(explained.spec.starts_with("https://fetch.spec.whatwg.org/#"));
         }
+    }
+
+    /// A TLS failure the stack classified names what went wrong, what fixes it and where the
+    /// rule is written, and the panel can show the host and the certificate it was shown.
+    #[test]
+    fn a_classified_tls_failure_explains_itself() {
+        use gosub_engine::events::{LoadError, TlsFailureKind};
+
+        let mut row = in_flight(None, None, None);
+        row.state = RequestState::Failed;
+        let mut fingerprint = [0u8; 32];
+        fingerprint[0] = 0xab;
+        fingerprint[1] = 0x0c;
+        fingerprint[31] = 0xff;
+        row.failure = Some(LoadError::Tls {
+            kind: TlsFailureKind::Expired,
+            host: "expired.badssl.test".into(),
+            fingerprint: Some(fingerprint),
+            message: "certificate expired".into(),
+        });
+
+        assert_eq!(row.failure_label(), Some("TLS"));
+        assert_eq!(row.tls_kind(), Some(TlsFailureKind::Expired));
+        assert!(row.failure_hint().unwrap().contains("expired"));
+        assert!(row.failure_fix().unwrap().contains("renew"));
+        assert_eq!(row.failure_spec(), Some("https://www.rfc-editor.org/rfc/rfc5280#section-4.1.2.5"));
+        assert_eq!(row.tls_host(), Some("expired.badssl.test"));
+        let shown = row.tls_fingerprint().unwrap();
+        assert!(shown.starts_with("AB:0C:00:"), "{shown}");
+        assert!(shown.ends_with(":FF"), "{shown}");
+        // 32 pairs of hex digits and the 31 colons between them.
+        assert_eq!(shown.len(), 32 * 2 + 31);
+    }
+
+    /// No fingerprint when the server never got as far as presenting a certificate.
+    #[test]
+    fn a_handshake_failure_has_no_fingerprint() {
+        use gosub_engine::events::{LoadError, TlsFailureKind};
+
+        let mut row = in_flight(None, None, None);
+        row.failure = Some(LoadError::Tls {
+            kind: TlsFailureKind::Handshake,
+            host: "old.test".into(),
+            fingerprint: None,
+            message: "no common protocol version".into(),
+        });
+        assert_eq!(row.tls_fingerprint(), None);
+        assert!(row.failure_hint().unwrap().contains("cipher suite"));
+    }
+
+    /// Every TLS kind the engine can classify has its own words; only `Other` falls through.
+    #[test]
+    fn every_tls_kind_is_explained() {
+        use gosub_engine::events::TlsFailureKind::*;
+        for kind in [
+            Expired,
+            NotYetValid,
+            UnknownIssuer,
+            HostnameMismatch,
+            Revoked,
+            InvalidCertificate,
+            Handshake,
+        ] {
+            let explained = explain_tls(kind).unwrap_or_else(|| panic!("{kind:?} has no explanation"));
+            assert!(explained.spec.starts_with("https://www.rfc-editor.org/rfc/rfc"));
+        }
+        assert_eq!(explain_tls(Other), None);
+    }
+
+    use gosub_engine::events::ResourceEvent;
+    use gosub_engine::net::req_ref_tracker::RequestReference;
+
+    /// Feed a `Started` for a fresh request and hand back the event it was folded from, so the
+    /// following events can carry the same id. The log is process-global and tests run in
+    /// parallel, so every test reads only its own row.
+    fn started(url: &str) -> ResourceEvent {
+        let event = ResourceEvent::Started {
+            request_id: Default::default(),
+            reference: RequestReference::Document(1),
+            url: url.into(),
+            kind: gosub_engine::net::types::ResourceKind::Fetch,
+            initiator: gosub_engine::net::types::Initiator::Script,
+        };
+        record_resource(None, &event);
+        event
+    }
+
+    /// The row a test's events were folded into.
+    fn row_for(event: &ResourceEvent) -> NetRequest {
+        let ResourceEvent::Started { request_id, .. } = event else {
+            unreachable!("built by started()")
+        };
+        requests(None)
+            .into_iter()
+            .find(|r| r.id == request_id.0)
+            .expect("the row was recorded")
+    }
+
+    /// Build a follow-up event for the same request.
+    macro_rules! follow {
+        ($start:expr, $variant:ident { $($field:tt)* }) => {{
+            let ResourceEvent::Started { request_id, reference, .. } = &$start else { unreachable!() };
+            ResourceEvent::$variant { request_id: *request_id, reference: *reference, $($field)* }
+        }};
+    }
+
+    #[test]
+    fn a_cache_hit_is_recorded_and_answers_for_the_row() {
+        use gosub_engine::events::CacheOutcome;
+        let url = "https://cache.test/app.js";
+        let start = started(url);
+        record_resource(
+            None,
+            &follow!(
+                start,
+                Cache {
+                    url: url.into(),
+                    outcome: CacheOutcome::Hit
+                }
+            ),
+        );
+        let row = row_for(&start);
+        assert_eq!(row.cache, [(url.to_string(), CacheOutcome::Hit)]);
+        assert_eq!(row.cache_answer(), Some(CacheOutcome::Hit));
+    }
+
+    /// Storing a response on the way past is not answering from cache: the bytes still came
+    /// from the network.
+    #[test]
+    fn a_stored_response_is_not_a_cache_answer() {
+        use gosub_engine::events::CacheOutcome;
+        let url = "https://cache.test/fresh.css";
+        let start = started(url);
+        record_resource(
+            None,
+            &follow!(
+                start,
+                Cache {
+                    url: url.into(),
+                    outcome: CacheOutcome::Stored
+                }
+            ),
+        );
+        let row = row_for(&start);
+        assert_eq!(row.cache.len(), 1);
+        assert_eq!(row.cache_answer(), None);
+    }
+
+    #[test]
+    fn an_auth_challenge_is_recorded() {
+        use gosub_engine::events::{AuthChallenge, AuthTarget};
+        let url = "https://auth.test/private";
+        let start = started(url);
+        let challenge = AuthChallenge {
+            scheme: "Basic".into(),
+            realm: Some("staff".into()),
+        };
+        record_resource(
+            None,
+            &follow!(
+                start,
+                AuthRequired {
+                    url: url.into(),
+                    target: AuthTarget::Server,
+                    challenges: vec![challenge.clone()],
+                    retried: true
+                }
+            ),
+        );
+        let row = row_for(&start);
+        assert_eq!(
+            row.auth,
+            [AuthSeen {
+                url: url.into(),
+                target: AuthTarget::Server,
+                challenges: vec![challenge],
+                retried: true,
+            }]
+        );
+        assert_eq!(row.auth[0].challenges_label(), "Basic realm=\"staff\"");
+    }
+
+    #[test]
+    fn an_upgrade_and_a_request_change_are_recorded() {
+        use gosub_engine::events::{RequestChange, UpgradeReason};
+        let start = started("http://hsts.test/");
+        record_resource(
+            None,
+            &follow!(
+                start,
+                SecurityUpgraded {
+                    from: "http://hsts.test/".into(),
+                    to: "https://hsts.test/".into(),
+                    reason: UpgradeReason::Hsts
+                }
+            ),
+        );
+        record_resource(
+            None,
+            &follow!(
+                start,
+                RequestModified {
+                    url: "https://hsts.test/".into(),
+                    change: RequestChange::CredentialsWithheld
+                }
+            ),
+        );
+        let row = row_for(&start);
+        assert_eq!(
+            row.upgrades,
+            [Upgrade {
+                from: "http://hsts.test/".into(),
+                to: "https://hsts.test/".into(),
+                reason: UpgradeReason::Hsts,
+            }]
+        );
+        assert_eq!(
+            row.changes,
+            [("https://hsts.test/".to_string(), RequestChange::CredentialsWithheld)]
+        );
+        assert_eq!(row.url, "https://hsts.test/", "the row follows the upgrade");
+    }
+
+    /// A cache hit on an upgraded hop answers for the row: the hop that was looked up is the
+    /// `https` one.
+    #[test]
+    fn a_cache_hit_after_an_upgrade_answers_for_the_row() {
+        use gosub_engine::events::{CacheOutcome, UpgradeReason};
+        let start = started("http://hsts-cache.test/");
+        record_resource(
+            None,
+            &follow!(
+                start,
+                SecurityUpgraded {
+                    from: "http://hsts-cache.test/".into(),
+                    to: "https://hsts-cache.test/".into(),
+                    reason: UpgradeReason::Hsts
+                }
+            ),
+        );
+        record_resource(
+            None,
+            &follow!(
+                start,
+                Cache {
+                    url: "https://hsts-cache.test/".into(),
+                    outcome: CacheOutcome::Hit
+                }
+            ),
+        );
+        assert_eq!(row_for(&start).cache_answer(), Some(CacheOutcome::Hit));
+    }
+
+    /// A retry starts the row over for the next attempt, but keeps what the request as a whole
+    /// went through, and the row stops looking failed.
+    #[test]
+    fn a_retry_resets_the_attempt_and_keeps_the_history() {
+        use gosub_engine::events::{CacheOutcome, LoadError};
+        use std::time::Duration;
+        let url = "https://flaky.test/";
+        let start = started(url);
+        record_resource(
+            None,
+            &follow!(
+                start,
+                DnsResolved {
+                    host: "flaky.test".into(),
+                    elapsed_us: 900
+                }
+            ),
+        );
+        record_resource(
+            None,
+            &follow!(
+                start,
+                Cache {
+                    url: url.into(),
+                    outcome: CacheOutcome::Invalidated
+                }
+            ),
+        );
+        record_resource(
+            None,
+            &follow!(
+                start,
+                Failed {
+                    url: url.into(),
+                    error: LoadError::Connect {
+                        message: "connection reset".into()
+                    }
+                }
+            ),
+        );
+        let started_ms = row_for(&start).started_ms;
+        record_resource(
+            None,
+            &follow!(
+                start,
+                Retrying {
+                    url: url.into(),
+                    attempt: 1,
+                    delay: Duration::from_millis(250),
+                    reason: "connection reset".into()
+                }
+            ),
+        );
+
+        let row = row_for(&start);
+        assert_eq!(
+            row.retries,
+            [Retry {
+                attempt: 1,
+                delay_us: 250_000,
+                reason: "connection reset".into(),
+            }]
+        );
+        assert_eq!(row.state, RequestState::Queued);
+        assert!(row.error.is_none() && row.failure.is_none());
+        assert_eq!(row.dns_us, None);
+        assert_eq!(row.started_ms, started_ms, "the row keeps its place");
+        assert_eq!(row.cache.len(), 1, "history is kept across attempts");
+
+        // The next attempt's `Started` picks the row up again.
+        record_resource(None, &start);
+        assert_eq!(row_for(&start).state, RequestState::Running);
+    }
+
+    #[test]
+    fn a_preflight_is_matched_with_its_response() {
+        use std::time::Duration;
+        let url = "https://api.test/items";
+        let start = started(url);
+        record_resource(None, &follow!(start, CorsPreflight { url: url.into() }));
+        assert_eq!(
+            row_for(&start).preflights,
+            [Preflight {
+                url: url.into(),
+                elapsed_us: None
+            }]
+        );
+        record_resource(
+            None,
+            &follow!(
+                start,
+                CorsPreflightDone {
+                    url: url.into(),
+                    elapsed: Duration::from_millis(12)
+                }
+            ),
+        );
+        assert_eq!(
+            row_for(&start).preflights,
+            [Preflight {
+                url: url.into(),
+                elapsed_us: Some(12_000)
+            }]
+        );
+    }
+
+    #[test]
+    fn the_detail_lists_stay_bounded() {
+        let url = "https://loop.test/";
+        let start = started(url);
+        for _ in 0..DETAIL_CAP + 8 {
+            record_resource(None, &follow!(start, CorsPreflight { url: url.into() }));
+        }
+        assert_eq!(row_for(&start).preflights.len(), DETAIL_CAP);
     }
 }

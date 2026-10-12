@@ -634,6 +634,22 @@ int main(void) {
     CHECK(beacon_net_request_header_name(browser, 0, 9999) == NULL, "an out-of-range header is NULL");
     CHECK(beacon_net_redirect_status(browser, 0, 9999) == 0, "an out-of-range redirect hop is 0");
 
+    /* A file:// load meets no cache, no auth, no upgrade, no retry and no preflight, and
+     * reading past the end of each list must say "nothing" in that list's own terms. */
+    CHECK(row.cache_answer == BEACON_CACHE_NONE, "a file:// load was not answered from cache");
+    CHECK(row.retry_count == 0 && row.preflight_count == 0 && row.auth_count == 0, "and has nothing to list");
+    CHECK(beacon_net_tls_host(browser, 0) == NULL && beacon_net_tls_fingerprint(browser, 0) == NULL,
+          "and no TLS failure");
+    CHECK(beacon_net_cache_outcome(browser, 0, 9999) == BEACON_CACHE_NONE, "an out-of-range cache entry is NONE");
+    CHECK(beacon_net_cache_label(browser, 0, 9999) == NULL, "and has no label");
+    CHECK(beacon_net_auth_challenges(browser, 0, 9999) == NULL && !beacon_net_auth_retried(browser, 0, 9999),
+          "an out-of-range auth entry is NULL and false");
+    CHECK(beacon_net_upgrade_reason(browser, 0, 9999) == NULL && beacon_net_change_label(browser, 0, 9999) == NULL,
+          "an out-of-range upgrade or change is NULL");
+    CHECK(beacon_net_retry_attempt(browser, 0, 9999) == 0 && beacon_net_retry_delay_us(browser, 0, 9999) == BEACON_ABSENT,
+          "an out-of-range retry is 0 and BEACON_ABSENT");
+    CHECK(beacon_net_preflight_us(browser, 0, 9999) == BEACON_ABSENT, "an out-of-range preflight is BEACON_ABSENT");
+
     beacon_net_clear(browser);
     CHECK(beacon_net_snapshot(browser, 0) == 0, "clearing empties the panel");
     CHECK(beacon_net_captured_body_bytes(browser) == 0, "and the held bodies with it");
