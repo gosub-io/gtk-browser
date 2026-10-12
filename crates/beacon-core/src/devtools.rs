@@ -890,6 +890,9 @@ pub fn record_resource(tab: Option<crate::tab::TabId>, event: &gosub_engine::eve
             ..
         } => {
             let entry = row(&mut requests, request_id.0, to, tab);
+            // The upgraded URL is the one that goes out, as after a redirect: what the
+            // cache or the server answers from here is for `to`.
+            entry.url = to.clone();
             push_capped(
                 &mut entry.upgrades,
                 Upgrade {
@@ -1618,6 +1621,37 @@ mod tests {
             row.changes,
             [("https://hsts.test/".to_string(), RequestChange::CredentialsWithheld)]
         );
+        assert_eq!(row.url, "https://hsts.test/", "the row follows the upgrade");
+    }
+
+    /// A cache hit on an upgraded hop answers for the row: the hop that was looked up is the
+    /// `https` one.
+    #[test]
+    fn a_cache_hit_after_an_upgrade_answers_for_the_row() {
+        use gosub_engine::events::{CacheOutcome, UpgradeReason};
+        let start = started("http://hsts-cache.test/");
+        record_resource(
+            None,
+            &follow!(
+                start,
+                SecurityUpgraded {
+                    from: "http://hsts-cache.test/".into(),
+                    to: "https://hsts-cache.test/".into(),
+                    reason: UpgradeReason::Hsts
+                }
+            ),
+        );
+        record_resource(
+            None,
+            &follow!(
+                start,
+                Cache {
+                    url: "https://hsts-cache.test/".into(),
+                    outcome: CacheOutcome::Hit
+                }
+            ),
+        );
+        assert_eq!(row_for(&start).cache_answer(), Some(CacheOutcome::Hit));
     }
 
     /// A retry starts the row over for the next attempt, but keeps what the request as a whole
