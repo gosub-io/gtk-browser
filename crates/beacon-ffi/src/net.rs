@@ -42,6 +42,36 @@ pub enum BeaconRequestPhase {
     Done = 5,
 }
 
+/// What the HTTP cache did with a hop. 0 is "nothing reported", so a zeroed value and an
+/// out-of-range read both say that.
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub enum BeaconCacheOutcome {
+    None = 0,
+    /// A stored response was used without contacting the server.
+    Hit = 1,
+    /// A stored response was revalidated: the server answered `304`.
+    Validated = 2,
+    /// The network's response was written to the cache.
+    Stored = 3,
+    /// Stored responses for the URL were dropped.
+    Invalidated = 4,
+    /// An outcome this build does not know.
+    Other = 5,
+}
+
+fn cache_outcome(outcome: Option<gosub_engine::events::CacheOutcome>) -> BeaconCacheOutcome {
+    use gosub_engine::events::CacheOutcome;
+    match outcome {
+        None => BeaconCacheOutcome::None,
+        Some(CacheOutcome::Hit) => BeaconCacheOutcome::Hit,
+        Some(CacheOutcome::Validated) => BeaconCacheOutcome::Validated,
+        Some(CacheOutcome::Stored) => BeaconCacheOutcome::Stored,
+        Some(CacheOutcome::Invalidated) => BeaconCacheOutcome::Invalidated,
+        Some(_) => BeaconCacheOutcome::Other,
+    }
+}
+
 /// Everything about a request that is a number. The strings are read with the accessors
 /// below, because a struct of owned pointers would need a matching free function and this
 /// way the caller frees each string exactly as it frees every other string here.
@@ -74,6 +104,16 @@ pub struct BeaconRequestRow {
     /// A body was captured and then dropped to stay inside the total budget — which is a
     /// different thing to say than "none was captured", and a panel should say it.
     pub body_evicted: bool,
+    /// How the cache answered the hop the row ends on: `Hit`, `Validated`, or `None` when
+    /// the bytes came from the network. What a status column marks as "(cache)".
+    pub cache_answer: BeaconCacheOutcome,
+    /// How many entries each detail list holds, for the indexed getters below.
+    pub cache_count: usize,
+    pub auth_count: usize,
+    pub upgrade_count: usize,
+    pub change_count: usize,
+    pub retry_count: usize,
+    pub preflight_count: usize,
 }
 
 fn absent(value: Option<u64>) -> u64 {
@@ -202,6 +242,13 @@ pub unsafe extern "C" fn beacon_net_at(browser: *mut BeaconBrowser, index: usize
         has_body: request.body.is_some(),
         body_truncated: request.body_truncated,
         body_evicted: request.body_evicted,
+        cache_answer: cache_outcome(request.cache_answer()),
+        cache_count: request.cache.len(),
+        auth_count: request.auth.len(),
+        upgrade_count: request.upgrades.len(),
+        change_count: request.changes.len(),
+        retry_count: request.retries.len(),
+        preflight_count: request.preflights.len(),
     };
     unsafe { std::ptr::write(out, row) };
     true
@@ -243,7 +290,7 @@ row_string!(
 );
 row_string!(
     beacon_net_method,
-    "The method actually sent. NULL for a request that never reached the network — a file:// load, or one answered from cache.",
+    "The method actually sent. NULL for a request that never reached the network -- a cache hit (`cache_answer` says so), a file:// load, or one that failed before it was sent.",
     |r| r.method.clone()
 );
 row_string!(beacon_net_content_type, "The response's declared content type.", |r| r
@@ -279,13 +326,23 @@ row_string!(
 );
 row_string!(
     beacon_net_failure_fix,
-    "What would make the request succeed, when the failure names a rule precise enough to say — today, a CORS refusal. NULL otherwise.",
+    "What would make the request succeed, when the failure names a rule precise enough to say -- a CORS refusal or a classified TLS failure. NULL otherwise.",
     |r| r.failure_fix().map(str::to_string)
 );
 row_string!(
     beacon_net_failure_spec,
     "A link to the rule that refused the request, alongside `failure_fix`. NULL otherwise.",
     |r| r.failure_spec().map(str::to_string)
+);
+row_string!(
+    beacon_net_tls_host,
+    "The host a failed TLS handshake was with. NULL for any other failure.",
+    |r| r.tls_host().map(str::to_string)
+);
+row_string!(
+    beacon_net_tls_fingerprint,
+    "The SHA-256 fingerprint of the certificate a failed TLS handshake was shown, as `AB:CD:...`. NULL when there was none, or for any other failure.",
+    |r| r.tls_fingerprint()
 );
 row_string!(
     beacon_net_body_text,
@@ -358,3 +415,168 @@ pub unsafe extern "C" fn beacon_net_redirect_status(browser: *mut BeaconBrowser,
         .map(|(status, _)| *status as u32)
         .unwrap_or(0)
 }
+
+/// One string off entry `entry` of one of a row's detail lists, by index into the matching
+/// `*_count`.
+macro_rules! detail_string {
+    ($name:ident, $doc:literal, |$request:ident| $list:expr, |$item:ident| $value:expr) => {
+        #[doc = $doc]
+        ///
+        /// Free with [`crate::beacon_string_free`]; NULL when out of range.
+        ///
+        /// # Safety
+        /// `browser` must be a live handle from [`crate::beacon_new`].
+        #[no_mangle]
+        pub unsafe extern "C" fn $name(browser: *mut BeaconBrowser, index: usize, entry: usize) -> *mut c_char {
+            let b = browser!(browser, std::ptr::null_mut());
+            let Some($request) = b.requests.get(index) else {
+                return std::ptr::null_mut();
+            };
+            match $list.get(entry) {
+                Some($item) => to_c_string(&$value),
+                None => std::ptr::null_mut(),
+            }
+        }
+    };
+}
+
+/// One number off entry `entry` of a detail list, `$absent` when out of range.
+macro_rules! detail_value {
+    ($name:ident, $doc:literal, $ty:ty, $absent:expr, |$request:ident| $list:expr, |$item:ident| $value:expr) => {
+        #[doc = $doc]
+        ///
+        /// # Safety
+        /// `browser` must be a live handle from [`crate::beacon_new`].
+        #[no_mangle]
+        pub unsafe extern "C" fn $name(browser: *mut BeaconBrowser, index: usize, entry: usize) -> $ty {
+            let b = browser!(browser, $absent);
+            let Some($request) = b.requests.get(index) else {
+                return $absent;
+            };
+            match $list.get(entry) {
+                Some($item) => $value,
+                None => $absent,
+            }
+        }
+    };
+}
+
+detail_value!(
+    beacon_net_cache_outcome,
+    "What the cache did, for cache entry `entry`. `None` when out of range.",
+    BeaconCacheOutcome,
+    BeaconCacheOutcome::None,
+    |r| r.cache,
+    |item| cache_outcome(Some(item.1))
+);
+detail_string!(
+    beacon_net_cache_label,
+    "What the cache did, for cache entry `entry`, in words: `served from cache`, `revalidated (304)`, ...",
+    |r| r.cache,
+    |item| item.1.to_string()
+);
+detail_string!(
+    beacon_net_cache_url,
+    "The hop cache entry `entry` was about.",
+    |r| r.cache,
+    |item| item.0
+);
+
+detail_string!(
+    beacon_net_auth_url,
+    "The hop that was answered with auth entry `entry`'s `401` or `407`.",
+    |r| r.auth,
+    |item| item.url
+);
+detail_string!(
+    beacon_net_auth_challenges,
+    "The challenges auth entry `entry` offered, as one line: `Basic realm=\"staff\", Bearer`.",
+    |r| r.auth,
+    |item| item.challenges_label()
+);
+detail_value!(
+    beacon_net_auth_is_proxy,
+    "Whether auth entry `entry` was a proxy's `407` rather than the server's `401`. False when out of range.",
+    bool,
+    false,
+    |r| r.auth,
+    |item| item.target == gosub_engine::events::AuthTarget::Proxy
+);
+detail_value!(
+    beacon_net_auth_retried,
+    "Whether the hop of auth entry `entry` was sent again with credentials. False means the `401`/`407` is the response; also false when out of range.",
+    bool,
+    false,
+    |r| r.auth,
+    |item| item.retried
+);
+
+detail_string!(
+    beacon_net_upgrade_from,
+    "The `http` URL upgrade `entry` rewrote.",
+    |r| r.upgrades,
+    |item| item.from
+);
+detail_string!(
+    beacon_net_upgrade_to,
+    "The `https` URL upgrade `entry` sent instead.",
+    |r| r.upgrades,
+    |item| item.to
+);
+detail_string!(
+    beacon_net_upgrade_reason,
+    "Why upgrade `entry` happened: `HSTS`, `mixed content`, ...",
+    |r| r.upgrades,
+    |item| item.reason.to_string()
+);
+
+detail_string!(
+    beacon_net_change_url,
+    "The hop a policy changed, for change `entry`.",
+    |r| r.changes,
+    |item| item.0
+);
+detail_string!(
+    beacon_net_change_label,
+    "What a policy changed instead of refusing the request, for change `entry`, in words.",
+    |r| r.changes,
+    |item| item.1.to_string()
+);
+
+detail_value!(
+    beacon_net_retry_attempt,
+    "Which retry entry `entry` was, from 1. 0 when out of range.",
+    u32,
+    0,
+    |r| r.retries,
+    |item| item.attempt
+);
+detail_value!(
+    beacon_net_retry_delay_us,
+    "How long the stack waited before retry `entry`. `BEACON_ABSENT` when out of range.",
+    u64,
+    BEACON_ABSENT,
+    |r| r.retries,
+    |item| item.delay_us
+);
+detail_string!(
+    beacon_net_retry_reason,
+    "Why the attempt before retry `entry` failed, in the stack's words.",
+    |r| r.retries,
+    |item| item.reason
+);
+
+detail_string!(
+    beacon_net_preflight_url,
+    "The hop CORS preflight `entry` asked permission for.",
+    |r| r.preflights,
+    |item| item.url
+);
+detail_value!(
+    beacon_net_preflight_us,
+    "How long CORS preflight `entry` took. `BEACON_ABSENT` while it is out, for one that failed outright, and when out of range.",
+    u64,
+    BEACON_ABSENT,
+    |r| r.preflights,
+    |item| absent(item.elapsed_us)
+);

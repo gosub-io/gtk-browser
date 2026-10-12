@@ -1576,9 +1576,15 @@ impl BrowserWindow {
             // A failed request has no status code, and "err" says nothing a developer can
             // act on. The kind the engine derived does: "TLS" and "no connection" send you
             // to different places.
+            //
+            // A response the cache answered says so, the way other browsers mark it: a hit
+            // sent nothing and has no status of its own, a revalidation got its 304.
+            let cached = request.cache_answer().is_some();
             let status = match (request.status, request.state) {
+                (Some(code), _) if cached => format!("{code} (cache)"),
                 (Some(code), _) => code.to_string(),
                 (None, beacon_core::devtools::RequestState::Failed) => request.failure_label().unwrap_or("err").to_string(),
+                (None, _) if cached => "(cache)".to_string(),
                 _ => "—".to_string(),
             };
             let size = if request.received_bytes > 0 {
@@ -1608,8 +1614,10 @@ impl BrowserWindow {
                 None => request.state.label().to_string(),
             };
 
-            // A request that never reached the wire has no method to report -- a file://
-            // load, or one answered from cache before a hop was built.
+            // A request that never reached the wire has no method to report. A cache hit is
+            // one, and the status column says so from the engine's own report; with no cache
+            // outcome, a missing method is a file:// load or a request that failed before
+            // its request line went out.
             let method = request.method.as_deref().unwrap_or("—").to_string();
             rows.push(NetworkRow {
                 id: request.id,
@@ -1702,6 +1710,99 @@ impl BrowserWindow {
         self.show_request_detail();
     }
 
+    /// What happened to the request on its way out, for the Request tab: upgrades and policy
+    /// changes, CORS preflights, and retries. Each section only when there is something in it.
+    fn push_security_rows(&self, request: &beacon_core::devtools::NetRequest, rows: &mut Vec<DetailRow>) {
+        use beacon_core::devtools::format_duration;
+
+        // The hop's URL only when it is not the one the row already shows, which is the
+        // common case and would repeat the URL on every line.
+        let on = |url: &str| {
+            if url == request.url {
+                String::new()
+            } else {
+                format!(" ({url})")
+            }
+        };
+
+        if !request.upgrades.is_empty() || !request.changes.is_empty() {
+            rows.push(DetailRow::Section("Security".into()));
+            for upgrade in &request.upgrades {
+                rows.push(DetailRow::Pair(
+                    format!("Upgraded ({})", upgrade.reason),
+                    format!("{} -> {}", upgrade.from, upgrade.to),
+                ));
+            }
+            for (url, change) in &request.changes {
+                rows.push(DetailRow::Pair("Changed".into(), format!("{change}{}", on(url))));
+            }
+        }
+
+        if !request.preflights.is_empty() {
+            rows.push(DetailRow::Section("CORS preflight".into()));
+            for preflight in &request.preflights {
+                let took = match preflight.elapsed_us {
+                    Some(us) => format_duration(us),
+                    None if request.phase() == beacon_core::devtools::Phase::Done => "no response".into(),
+                    None => "waiting".into(),
+                };
+                rows.push(DetailRow::Pair("OPTIONS".into(), format!("{took}{}", on(&preflight.url))));
+            }
+        }
+
+        if !request.retries.is_empty() {
+            rows.push(DetailRow::Section("Retries".into()));
+            for retry in &request.retries {
+                rows.push(DetailRow::Pair(
+                    format!("Retry {}", retry.attempt),
+                    format!("after {}: {}", format_duration(retry.delay_us), retry.reason),
+                ));
+            }
+            rows.push(DetailRow::Note("Timings and the response are from the latest attempt.".into()));
+        }
+    }
+
+    /// What the cache did and which credentials were asked for, for the Response tab. Each
+    /// section only when there is something in it.
+    fn push_cache_and_auth_rows(&self, request: &beacon_core::devtools::NetRequest, rows: &mut Vec<DetailRow>) {
+        use gosub_engine::events::AuthTarget;
+
+        let on = |url: &str| {
+            if url == request.url {
+                String::new()
+            } else {
+                format!(" ({url})")
+            }
+        };
+
+        if !request.cache.is_empty() {
+            rows.push(DetailRow::Section("Cache".into()));
+            for (url, outcome) in &request.cache {
+                rows.push(DetailRow::Pair("Cache".into(), format!("{outcome}{}", on(url))));
+            }
+        }
+
+        if !request.auth.is_empty() {
+            rows.push(DetailRow::Section("Authentication".into()));
+            for seen in &request.auth {
+                let asked = match seen.target {
+                    AuthTarget::Server => "Server (401)",
+                    AuthTarget::Proxy => "Proxy (407)",
+                };
+                rows.push(DetailRow::Pair(
+                    asked.into(),
+                    format!("{}{}", seen.challenges_label(), on(&seen.url)),
+                ));
+                let answered = if seen.retried {
+                    "yes, sent again with credentials"
+                } else {
+                    "no: this response is what the page got"
+                };
+                rows.push(DetailRow::Pair("Answered".into(), answered.into()));
+            }
+        }
+    }
+
     /// Fill the detail tabs for the selected request.
     ///
     /// Split the way a developer thinks about a request rather than the way the events
@@ -1746,8 +1847,14 @@ impl BrowserWindow {
                 rows.push(DetailRow::Pair(status.to_string(), to.clone()));
             }
         }
+        self.push_security_rows(request, &mut rows);
         if request.request_headers.is_empty() {
-            rows.push(DetailRow::Note("No request line recorded: this never reached the network.".into()));
+            let note = if request.cache_answer() == Some(gosub_engine::events::CacheOutcome::Hit) {
+                "No request line: the cache answered without contacting the server."
+            } else {
+                "No request line recorded: this never reached the network."
+            };
+            rows.push(DetailRow::Note(note.into()));
         } else {
             rows.push(DetailRow::Section("Request headers".into()));
             for (name, value) in &request.request_headers {
@@ -1806,6 +1913,12 @@ impl BrowserWindow {
                 rows.push(DetailRow::Pair("Cause".into(), label.into()));
             }
             rows.push(DetailRow::Pair("Error".into(), error.clone()));
+            if let Some(host) = request.tls_host() {
+                rows.push(DetailRow::Pair("Host".into(), host.into()));
+            }
+            if let Some(fingerprint) = request.tls_fingerprint() {
+                rows.push(DetailRow::Pair("SHA-256".into(), fingerprint));
+            }
             if let Some(hint) = request.failure_hint() {
                 rows.push(DetailRow::Note(hint.into()));
             }
@@ -1825,6 +1938,7 @@ impl BrowserWindow {
                 }
             }
         }
+        self.push_cache_and_auth_rows(request, &mut rows);
         if request.headers.is_empty() {
             rows.push(DetailRow::Note("No response headers recorded.".into()));
         } else {
