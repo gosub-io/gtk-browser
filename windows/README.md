@@ -46,7 +46,8 @@ the failure fix and spec links).
   the subsystem out; that is nothing to show rather than an error.
 
 Body capture and sensitive headers (`Cookie`, `Authorization`) are off by default and follow
-the window's visibility, so nothing is held in memory while the panel is closed.
+the window's visibility: closing the panel stops capturing them. What was already captured
+stays in the request log until it is evicted or cleared.
 
 Fields the engine never reported show as `-` rather than `0`: a request on a pooled
 connection resolves nothing, which is not the same as resolving instantly.
