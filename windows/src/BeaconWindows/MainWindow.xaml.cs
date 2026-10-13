@@ -243,12 +243,18 @@ public partial class MainWindow : Window
                     chromeDirty = true;
                     break;
 
+                // The status line belongs to the page on screen: a background tab loading must
+                // not write over it.
                 case BeaconNative.EventKind.LoadingChanged:
-                    StatusLine.Text = ev.Number != 0 ? "Loading..." : "Done";
+                    if (ev.Tab == _page.Tab)
+                    {
+                        StatusLine.Text = ev.Number != 0 ? "Loading..." : "Done";
+                    }
+
                     UpdateNavButtons();
                     break;
 
-                case BeaconNative.EventKind.Progress:
+                case BeaconNative.EventKind.Progress when ev.Tab == _page.Tab:
                     StatusLine.Text = ev.Number < 0 ? "Loading..." : $"Loading... {ev.Number * 100:0}%";
                     break;
 
@@ -256,11 +262,11 @@ public partial class MainWindow : Window
                     UpdateNavButtons();
                     break;
 
-                case BeaconNative.EventKind.HoverUrl:
+                case BeaconNative.EventKind.HoverUrl when ev.Tab == _page.Tab:
                     StatusLine.Text = ev.Text ?? string.Empty;
                     break;
 
-                case BeaconNative.EventKind.NavigationFailed:
+                case BeaconNative.EventKind.NavigationFailed when ev.Tab == _page.Tab:
                     StatusLine.Text = ev.Text ?? string.Empty;
                     break;
 
