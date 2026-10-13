@@ -224,11 +224,8 @@ internal sealed class DeveloperPanel : Window
             : row?.Raw.HasBody == true
                 ? "(body not captured - turn on \"Capture bodies\" and reload)"
                 : "(no body)");
-
-        if (row?.Raw.BodyTruncated == true && d.BodyText is not null)
-        {
-            _body.Text += "\n\n(the response continued past the captured preview)";
-        }
+        // A truncated body needs no note here: the text from beacon_net_body_text already
+        // ends with one.
 
         var parts = new List<string>();
         if (d.Error is { Length: > 0 } error)
