@@ -47,6 +47,10 @@ internal sealed class DeveloperPanel : Window
 
     private int _selectedIndex = -1;
 
+    /// <summary>Set while RefreshNetwork rebuilds the list. Replacing ItemsSource and restoring
+    /// the selection both raise SelectionChanged, which would refresh again, without end.</summary>
+    private bool _refreshingNetwork;
+
     public DeveloperPanel(BeaconBrowser browser)
     {
         _browser = browser;
@@ -97,6 +101,11 @@ internal sealed class DeveloperPanel : Window
         _requests.View = grid;
         _requests.SelectionChanged += (_, _) =>
         {
+            if (_refreshingNetwork)
+            {
+                return;
+            }
+
             _selectedIndex = _requests.SelectedItem is NetRowView row ? row.Index : -1;
             RefreshNetwork();
         };
@@ -164,10 +173,22 @@ internal sealed class DeveloperPanel : Window
         var rows = _browser.SnapshotNetwork(scope);
 
         var keepIndex = _selectedIndex;
-        _requests.ItemsSource = rows.Select(NetRowView.From).ToList();
+        _refreshingNetwork = true;
+        try
+        {
+            _requests.ItemsSource = rows.Select(NetRowView.From).ToList();
+            if (keepIndex >= 0 && keepIndex < rows.Count)
+            {
+                _requests.SelectedIndex = keepIndex;
+            }
+        }
+        finally
+        {
+            _refreshingNetwork = false;
+        }
+
         if (keepIndex >= 0 && keepIndex < rows.Count)
         {
-            _requests.SelectedIndex = keepIndex;
             ShowDetail(_browser.ReadNetDetail(keepIndex), rows[keepIndex]);
         }
         else
