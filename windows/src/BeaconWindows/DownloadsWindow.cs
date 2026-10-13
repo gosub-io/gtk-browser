@@ -83,7 +83,9 @@ internal sealed class DownloadsWindow : Window
             });
         }
 
-        var line = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
+        // LastChildFill off, or the Open button, added last, fills the rest of the line from
+        // its left edge instead of docking right.
+        var line = new DockPanel { Margin = new Thickness(0, 4, 0, 0), LastChildFill = false };
 
         if (download.State == BeaconNative.DownloadState.Running)
         {
