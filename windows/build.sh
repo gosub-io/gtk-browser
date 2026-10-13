@@ -34,3 +34,4 @@ dotnet build windows/src/BeaconWindows/BeaconWindows.csproj \
 echo
 echo "Built. Copy the output directory to Windows and run GosubBeacon.exe:"
 echo "  windows/src/BeaconWindows/bin/$([ "$PROFILE" = release ] && echo Release || echo Debug)/net10.0-windows/win-x64/"
+echo "The build is framework-dependent: the Windows machine needs the .NET 10 Desktop Runtime."

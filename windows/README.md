@@ -132,7 +132,8 @@ the Windows feature set to `svg` + `gl`.
 
 ## Running
 
-Copy the output directory to a Windows machine and run `GosubBeacon.exe`:
+Copy the output directory to a Windows machine and run `GosubBeacon.exe`. The build is
+framework-dependent, so that machine needs the .NET 10 Desktop Runtime:
 
 ```
 windows/src/BeaconWindows/bin/Debug/net10.0-windows/win-x64/
