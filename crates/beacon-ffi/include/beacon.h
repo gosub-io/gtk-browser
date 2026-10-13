@@ -659,12 +659,12 @@ size_t beacon_poll_events(BeaconBrowser *browser, BeaconEvent *out, size_t max);
  * which is pixels in memory and works everywhere.
  */
 
-/* Draw this tab into a view you own and lay out yourself: an NSView* on macOS, an HWND on
- * Windows. Beacon fills it; you position it among your tab bar and toolbar like any other
- * subview. Sizes are in device pixels.
+/* Draw this tab into a view you own and lay out yourself: an NSView*. Beacon fills it; you
+ * position it among your tab bar and toolbar like any other subview. Sizes are in device
+ * pixels.
  *
- * Returns false on platforms without a GPU path, or if the view cannot be wrapped -- fall
- * back to beacon_acquire_frame if it does.
+ * macOS only: everywhere else, Windows included, this returns false. It also returns false
+ * if the view cannot be wrapped -- fall back to beacon_acquire_frame if it does.
  *
  * The view must outlive the attachment: call beacon_detach_view before destroying it. */
 bool beacon_attach_view(BeaconBrowser *browser, BeaconTabId tab, void *view, uint32_t width, uint32_t height);

@@ -2119,11 +2119,12 @@ pub extern "C" fn beacon_reserved(_: *mut c_void) {}
 
 // ── native views (GPU path) ──────────────────────────────────────────────────
 
-/// Draw `tab` directly into a view the shell owns: an `NSView*` on macOS, an `HWND` on
-/// Windows. The page is rendered into that view with no copy and no readback, which is what
-/// a native chrome wants - it lays the view out among its own widgets and Beacon fills it.
+/// Draw `tab` directly into a view the shell owns: an `NSView*`. The page is rendered into
+/// that view with no copy and no readback, which is what a native chrome wants - it lays the
+/// view out among its own widgets and Beacon fills it.
 ///
-/// Returns false on platforms without this path, or if the view cannot be wrapped.
+/// macOS only. Everywhere else, Windows included, this returns false and the shell draws
+/// with [`beacon_acquire_frame`]. It also returns false if the view cannot be wrapped.
 ///
 /// # Safety
 /// `view` must be a valid pointer of the platform's expected type, and must outlive the
