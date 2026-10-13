@@ -20,14 +20,13 @@
   </PropertyGroup>
 
   <!-- The About artwork, shared with the macOS shell rather than copied, so the two cannot
-       disagree. JPEG rather than PNG: these are photographs, and PNG stored them at four
-       times the size. Link= sets the logical path, so they resolve at runtime as
-       pack://application:,,,/Resources/about.jpg -->
+       disagree. Link= sets the logical path, so they resolve at runtime as
+       pack://application:,,,/Resources/about.png -->
   <ItemGroup>
-    <Resource Include="$(MSBuildThisFileDirectory)../../../swift/Sources/BeaconMac/Resources/about.jpg"
-              Link="Resources/about.jpg" />
-    <Resource Include="$(MSBuildThisFileDirectory)../../../swift/Sources/BeaconMac/Resources/about-credits.jpg"
-              Link="Resources/about-credits.jpg" />
+    <Resource Include="$(MSBuildThisFileDirectory)../../../swift/Sources/BeaconMac/Resources/about.png"
+              Link="Resources/about.png" />
+    <Resource Include="$(MSBuildThisFileDirectory)../../../swift/Sources/BeaconMac/Resources/about-credits.png"
+              Link="Resources/about-credits.png" />
   </ItemGroup>
 
   <!-- beacon.dll is built by cargo, not MSBuild. Copy whichever profile exists, newest last

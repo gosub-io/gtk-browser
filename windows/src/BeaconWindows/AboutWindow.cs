@@ -90,7 +90,7 @@ internal sealed class AboutWindow : Window
     {
         // Only the picture. The artwork is a finished composition down to the bottom edge,
         // so the version block lives in the bar rather than on top of it.
-        _artPage.Source = Artwork("about.jpg");
+        _artPage.Source = Artwork("about.png");
         _artPage.Stretch = Stretch.Uniform;
     }
 
@@ -99,7 +99,7 @@ internal sealed class AboutWindow : Window
         // The credits artwork keeps its left half clear; the scrolling column sits right.
         _creditsPage.Children.Add(new Image
         {
-            Source = Artwork("about-credits.jpg"),
+            Source = Artwork("about-credits.png"),
             Stretch = Stretch.Uniform,
         });
 
