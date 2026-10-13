@@ -25,6 +25,9 @@ internal sealed class TabStrip : UserControl
 
     private ulong _dragging;
 
+    /// <summary>Where the left button went down on a tab, so a drag waits for real movement.</summary>
+    private Point? _pressAt;
+
     public event Action<ulong>? TabActivated;
     public event Action<ulong>? TabClosed;
     public event Action? NewTabRequested;
@@ -163,10 +166,28 @@ internal sealed class TabStrip : UserControl
             }
         };
 
+        button.PreviewMouseLeftButtonDown += (s, e) => _pressAt = e.GetPosition((IInputElement)s);
+
         button.PreviewMouseMove += (s, e) =>
         {
-            if (e.LeftButton == MouseButtonState.Pressed && _dragging == 0)
+            if (e.LeftButton != MouseButtonState.Pressed)
             {
+                _pressAt = null;
+                return;
+            }
+
+            // A small twitch during a click must not start a drag: wait for the system's
+            // minimum drag distance, as WPF's own drag sources do.
+            if (_dragging == 0 && _pressAt is { } start)
+            {
+                var delta = e.GetPosition((IInputElement)s) - start;
+                if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance
+                    && Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
+                {
+                    return;
+                }
+
+                _pressAt = null;
                 _dragging = tab;
                 DragDrop.DoDragDrop((DependencyObject)s, tab, DragDropEffects.Move);
                 _dragging = 0;
