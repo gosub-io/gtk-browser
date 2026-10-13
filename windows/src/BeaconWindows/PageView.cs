@@ -91,11 +91,13 @@ internal sealed class PageView : FrameworkElement
             }
 
             // The engine may return a different size than requested: a resize in flight, or
-            // a frame rendered before the last viewport change landed. Follow the frame.
-            if (_bitmap is null || _bitmap.PixelWidth != frame.Width || _bitmap.PixelHeight != frame.Height)
+            // a frame rendered before the last viewport change landed. Follow the frame, its
+            // DPR included: the same pixels at another DPR lay out at another logical size.
+            // A bitmap declared at 96*dpr DPI lays out at the right logical size.
+            var dpi = 96.0 * Math.Max(1u, frame.Dpr);
+            if (_bitmap is null || _bitmap.PixelWidth != frame.Width || _bitmap.PixelHeight != frame.Height
+                || _bitmap.DpiX != dpi)
             {
-                // A bitmap declared at 96*dpr DPI lays out at the right logical size.
-                var dpi = 96.0 * Math.Max(1u, frame.Dpr);
                 _bitmap = new WriteableBitmap((int)frame.Width, (int)frame.Height, dpi, dpi,
                     PixelFormats.Pbgra32, palette: null);
                 Console.Error.WriteLine($"[beacon] first frame {frame.Width}x{frame.Height} dpr={frame.Dpr} stride={frame.Stride}");
