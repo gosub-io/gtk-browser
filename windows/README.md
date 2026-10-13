@@ -25,7 +25,10 @@ Working:
 - downloads: save dialog, progress, open when finished
 - the About dialog, sharing the macOS shell's artwork and credits crossfade
 
-This shell now binds **all 129 functions** of the C ABI.
+This shell binds 129 of the C ABI's 156 functions. Not yet bound: the form-control picker
+(`beacon_picker_*`, so date, time and color inputs open nothing) and the network panel's
+per-request detail (cache, auth, upgrades, request changes, retries, preflights, TLS, and
+the failure fix and spec links).
 
 ### Developer tools
 
@@ -175,7 +178,8 @@ windows/
     App.xaml[.cs]              startup and the "beacon.dll is missing" message
 ```
 
-The C ABI has 129 functions and this shell binds every one of them.
+The C ABI has 156 functions and this shell binds 129 of them; see the list near the top for
+what is still missing.
 
 ### Rules from `beacon.h` that this shell must keep
 
