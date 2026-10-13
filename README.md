@@ -19,8 +19,9 @@ More in [docs/screenshots](./docs/screenshots/).
 - **macOS**: a native Swift/AppKit shell in [swift/](./swift/README.md), over the C ABI in
   `crates/beacon-ffi`. Signed and notarized DMGs are published at
   [gosub.io/build](https://gosub.io/build).
-- **Windows**: on hold. A C#/WPF shell over the same C ABI exists on the unmerged
-  `windows` branch, but it is not being worked on, is behind `main` and is not built in CI.
+- **Windows**: a C#/WPF shell in [windows/](./windows/README.md), over the same C ABI.
+  It renders on the CPU (Skia), not the GPU. Both halves cross-compile from Linux with
+  `windows/build.sh`; running it needs Windows.
 
 ## Getting the source
 
