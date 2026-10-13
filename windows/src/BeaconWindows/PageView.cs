@@ -30,8 +30,23 @@ internal sealed class PageView : FrameworkElement
     /// still needs to be told.</summary>
     private (ulong Tab, uint Width, uint Height, float Scale) _sentViewport;
 
+    private ulong _tab;
+
     /// <summary>The tab being shown. Set by the window when the active tab changes.</summary>
-    public ulong Tab { get; set; }
+    public ulong Tab
+    {
+        get => _tab;
+        set
+        {
+            if (_tab != value)
+            {
+                // A hit test asked on the old tab answers about the old page; a menu built
+                // from it would act on the new one.
+                _tab = value;
+                _pendingHitToken = 0;
+            }
+        }
+    }
 
     public PageView()
     {
