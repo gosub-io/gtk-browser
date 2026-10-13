@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Gosub.Beacon.Windows.Interop;
@@ -19,6 +20,9 @@ internal sealed class DownloadsWindow : Window
     private readonly StackPanel _rows = new();
     private readonly TextBlock _status = new() { Margin = new Thickness(10, 4, 10, 6), Foreground = Brushes.Gray, FontSize = 11 };
     private readonly DispatcherTimer _timer;
+
+    /// <summary>What the rows were last built from, so an unchanged tick leaves them be.</summary>
+    private List<DownloadRow> _shown = new();
 
     public DownloadsWindow(BeaconBrowser browser)
     {
@@ -48,11 +52,24 @@ internal sealed class DownloadsWindow : Window
     public void Reload()
     {
         var downloads = _browser.Downloads();
-        _rows.Children.Clear();
 
-        foreach (var download in downloads)
+        // Rebuilding every tick would take keyboard focus off an Open button twice a second.
+        // Rebuild only when something changed, and give focus back to the same download's
+        // button when it did.
+        if (!downloads.SequenceEqual(_shown))
         {
-            _rows.Children.Add(BuildRow(download));
+            var focused = Keyboard.FocusedElement is Button { Tag: ulong id } && _rows.IsKeyboardFocusWithin ? id : (ulong?)null;
+            _rows.Children.Clear();
+            foreach (var download in downloads)
+            {
+                _rows.Children.Add(BuildRow(download));
+            }
+
+            _shown = downloads.ToList();
+            if (focused is { } wanted)
+            {
+                FindOpenButton(wanted)?.Focus();
+            }
         }
 
         var running = downloads.Count(d => d.State == BeaconNative.DownloadState.Running);
@@ -60,6 +77,12 @@ internal sealed class DownloadsWindow : Window
             ? "No downloads yet."
             : $"{downloads.Count} download{(downloads.Count == 1 ? "" : "s")}, {running} in progress";
     }
+
+    private Button? FindOpenButton(ulong id) =>
+        _rows.Children.OfType<StackPanel>()
+            .SelectMany(row => row.Children.OfType<DockPanel>())
+            .SelectMany(line => line.Children.OfType<Button>())
+            .FirstOrDefault(button => button.Tag is ulong tag && tag == id);
 
     private FrameworkElement BuildRow(DownloadRow download)
     {
@@ -128,6 +151,7 @@ internal sealed class DownloadsWindow : Window
                 Margin = new Thickness(10, 0, 0, 0),
                 ToolTip = "Hand it to the desktop's default application",
             };
+            open.Tag = download.Id;
             open.Click += (_, _) => _browser.OpenDownload(download.Id);
             DockPanel.SetDock(open, Dock.Right);
             line.Children.Add(open);
