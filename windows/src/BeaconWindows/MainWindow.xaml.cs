@@ -224,7 +224,7 @@ public partial class MainWindow : Window
                     chromeDirty = true;
                     if (ev.Tab == _page.Tab)
                     {
-                        Title = string.IsNullOrEmpty(ev.Text) ? "Gosub Beacon" : $"{ev.Text} - Gosub Beacon";
+                        SetTitle(ev.Text);
                     }
 
                     break;
@@ -322,6 +322,9 @@ public partial class MainWindow : Window
 
     // ── chrome ─────────────────────────────────────────────────────────────────
 
+    private void SetTitle(string? pageTitle) =>
+        Title = string.IsNullOrEmpty(pageTitle) ? "Gosub Beacon" : $"{pageTitle} - Gosub Beacon";
+
     private void SyncActiveTab()
     {
         _page.Tab = _browser.ActiveTab;
@@ -332,6 +335,8 @@ public partial class MainWindow : Window
 
         _page.SyncViewport();
         _page.Refresh();
+        // A tab that already loaded sends no TitleChanged on being selected.
+        SetTitle(_browser.TabTitle(_page.Tab));
         SetAddress(_browser.TabUrl(_page.Tab) ?? string.Empty);
         UpdateNavButtons();
         UpdateBookmarkButton();
