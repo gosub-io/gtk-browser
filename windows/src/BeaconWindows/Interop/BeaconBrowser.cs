@@ -148,6 +148,9 @@ internal sealed class BeaconBrowser : IDisposable
     // ── tabs ───────────────────────────────────────────────────────────────────
 
     public ulong OpenTab(string url) => BeaconNative.OpenTab(Handle, url);
+
+    /// <summary>Open a tab right after `after`, or at the end when `after` is not a tab.</summary>
+    public ulong OpenTabAfter(string url, ulong after) => BeaconNative.OpenTabAfter(Handle, url, after);
     public void CloseTab(ulong tab) => BeaconNative.CloseTab(Handle, tab);
     public void ActivateTab(ulong tab) => BeaconNative.ActivateTab(Handle, tab);
     public ulong ReopenClosedTab() => BeaconNative.ReopenClosedTab(Handle);

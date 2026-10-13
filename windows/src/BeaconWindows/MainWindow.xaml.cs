@@ -34,18 +34,19 @@ public partial class MainWindow : Window
         Tabs.TabActivated += tab => { _browser.ActivateTab(tab); SyncActiveTab(); Tabs.Rebuild(); };
         Tabs.TabClosed += tab => { _browser.CloseTab(tab); Tabs.Rebuild(); };
         Tabs.NewTabRequested += () => OpenTab(Homepage());
+        Tabs.NewTabRightRequested += tab => OpenTab(Homepage(), after: tab);
         Tabs.ViewSourceRequested += tab => Activate(_browser.ViewSource(tab));
         Tabs.DuplicateRequested += tab =>
         {
             if (_browser.TabUrl(tab) is { Length: > 0 } url)
             {
-                OpenTab(url);
+                OpenTab(url, after: tab);
             }
         };
 
         Bookmarks.Attach(_browser);
         Bookmarks.Navigate += url => Navigate(url);
-        Bookmarks.NavigateNewTab += OpenTab;
+        Bookmarks.NavigateNewTab += url => OpenTab(url);
 
         BackButton.Click += (_, _) => _browser.Back();
         ForwardButton.Click += (_, _) => _browser.Forward();
@@ -157,9 +158,11 @@ public partial class MainWindow : Window
         StatusLine.Text = $"Restored {session.Count} tab{(session.Count == 1 ? "" : "s")} from the last session";
     }
 
-    private void OpenTab(string url)
+    /// <summary>Open `url` in a new tab: at the end, or right after `after` for the tab
+    /// menu's "New Tab to the Right" and "Duplicate Tab".</summary>
+    private void OpenTab(string url, ulong after = 0)
     {
-        var tab = _browser.OpenTab(url);
+        var tab = after == 0 ? _browser.OpenTab(url) : _browser.OpenTabAfter(url, after);
         if (tab == 0)
         {
             StatusLine.Text = $"Could not parse URL: {url}";

@@ -28,6 +28,7 @@ internal sealed class TabStrip : UserControl
     public event Action<ulong>? TabActivated;
     public event Action<ulong>? TabClosed;
     public event Action? NewTabRequested;
+    public event Action<ulong>? NewTabRightRequested;
     public event Action<ulong>? ViewSourceRequested;
     public event Action<ulong>? DuplicateRequested;
 
@@ -193,7 +194,7 @@ internal sealed class TabStrip : UserControl
     {
         var menu = new ContextMenu();
 
-        menu.Items.Add(Item("New Tab to the Right", () => NewTabRequested?.Invoke()));
+        menu.Items.Add(Item("New Tab to the Right", () => NewTabRightRequested?.Invoke(tab)));
         menu.Items.Add(Item("Duplicate Tab", () => DuplicateRequested?.Invoke(tab)));
         menu.Items.Add(new Separator());
         // beacon_reload acts on the active tab and the ABI has no per-tab reload, so the tab
