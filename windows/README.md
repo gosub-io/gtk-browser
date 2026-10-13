@@ -150,12 +150,12 @@ The page is drawn with `beacon_acquire_frame`, which hands over finished BGRA pi
 `PageView` blits into a `WriteableBitmap`. Beacon's frames are premultiplied BGRA, which is
 exactly `PixelFormats.Pbgra32`, so nothing is converted.
 
-`beacon-ffi` also offers a GPU path: `beacon_attach_view` takes an HWND and Vello draws into
-it with no copy, which is faster on real hardware. The copy is used here because it needs no
-graphics adapter. On a machine whose display is a basic driver rather than a real one (a VM),
-there is no hardware D3D12, wgpu falls back to WARP, and Vello's compute shaders crash inside
-`d3d10warp.dll` with an access violation. Switching to the GPU path later is a change to
-`PageView.cs` and nothing else.
+There is no GPU path on Windows today. `beacon_attach_view` would take an HWND and have Vello
+draw into it with no copy, but beacon-ffi compiles that path on macOS only and returns false
+here. It was dropped because it needs a real graphics adapter: on a machine whose display is
+a basic driver (a VM), there is no hardware D3D12, wgpu falls back to WARP, and Vello's
+compute shaders crash inside `d3d10warp.dll` with an access violation. Bringing it back means
+a runtime backend choice in beacon-ffi first, then `PageView.cs`.
 
 ## Shape of the code
 
