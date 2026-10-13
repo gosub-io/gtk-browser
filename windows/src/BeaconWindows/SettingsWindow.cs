@@ -152,8 +152,9 @@ internal sealed class SettingsWindow : Window
         {
             if (_browser.ResetSetting(row.Key))
             {
-                _status.Text = $"{row.Key} reset to {row.Default}";
+                // After the reload: it writes its own row-count summary into the status line.
                 Reload();
+                _status.Text = $"{row.Key} reset to {row.Default}";
             }
             else
             {
@@ -241,8 +242,8 @@ internal sealed class SettingsWindow : Window
     {
         if (_browser.SetSetting(row.Key, value))
         {
-            _status.Text = $"{row.Key} = {value}";
             Reload();
+            _status.Text = $"{row.Key} = {value}";
             return;
         }
 
