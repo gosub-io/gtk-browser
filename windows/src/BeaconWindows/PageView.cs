@@ -173,17 +173,20 @@ internal sealed class PageView : FrameworkElement
         }
 
         Focus();
-        var p = e.GetPosition(this);
-        _browser.MouseDown(Tab, (float)p.X, (float)p.Y, Map(e.ChangedButton));
+        if (Map(e.ChangedButton) is { } button)
+        {
+            var p = e.GetPosition(this);
+            _browser.MouseDown(Tab, (float)p.X, (float)p.Y, button);
+        }
     }
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
         base.OnMouseUp(e);
-        if (_browser is not null && Tab != 0)
+        if (_browser is not null && Tab != 0 && Map(e.ChangedButton) is { } button)
         {
             var p = e.GetPosition(this);
-            _browser.MouseUp(Tab, (float)p.X, (float)p.Y, Map(e.ChangedButton));
+            _browser.MouseUp(Tab, (float)p.X, (float)p.Y, button);
         }
     }
 
@@ -243,10 +246,13 @@ internal sealed class PageView : FrameworkElement
         e.Handled = true;
     }
 
-    private static BeaconNative.Button Map(MouseButton button) => button switch
+    /// <summary>The engine knows three buttons. The side buttons (XButton1/2) are not page
+    /// clicks, so they map to nothing rather than to Left.</summary>
+    private static BeaconNative.Button? Map(MouseButton button) => button switch
     {
+        MouseButton.Left => BeaconNative.Button.Left,
         MouseButton.Right => BeaconNative.Button.Right,
         MouseButton.Middle => BeaconNative.Button.Middle,
-        _ => BeaconNative.Button.Left,
+        _ => null,
     };
 }
