@@ -25,8 +25,10 @@ internal sealed class PageView : FrameworkElement
     private BeaconBrowser? _browser;
     private WriteableBitmap? _bitmap;
 
-    /// <summary>Last viewport handed to the engine, to avoid re-sending it every layout pass.</summary>
-    private (uint Width, uint Height, float Scale) _sentViewport;
+    /// <summary>Last viewport handed to the engine, to avoid re-sending it every layout pass.
+    /// Keyed by tab too: each tab has its own viewport, and one shown in a same-sized view
+    /// still needs to be told.</summary>
+    private (ulong Tab, uint Width, uint Height, float Scale) _sentViewport;
 
     /// <summary>The tab being shown. Set by the window when the active tab changes.</summary>
     public ulong Tab { get; set; }
@@ -59,12 +61,12 @@ internal sealed class PageView : FrameworkElement
         var width = (uint)Math.Max(1, Math.Round(ActualWidth));
         var height = (uint)Math.Max(1, Math.Round(ActualHeight));
 
-        if ((width, height, scale) == _sentViewport)
+        if ((Tab, width, height, scale) == _sentViewport)
         {
             return;
         }
 
-        _sentViewport = (width, height, scale);
+        _sentViewport = (Tab, width, height, scale);
         _browser.SetViewport(Tab, width, height, scale);
         Console.Error.WriteLine($"[beacon] viewport tab={Tab} {width}x{height} @{scale}");
     }
