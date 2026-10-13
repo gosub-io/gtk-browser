@@ -397,8 +397,6 @@ internal sealed class BeaconBrowser : IDisposable
 
     public void SetZoom(ulong tab, float zoom) => BeaconNative.SetZoom(Handle, tab, zoom);
 
-    public void Reload(ulong tab, bool ignoreCache) => BeaconNative.Reload(Handle, ignoreCache);
-
     // ── developer panel: console ───────────────────────────────────────────────
 
     /// <summary>

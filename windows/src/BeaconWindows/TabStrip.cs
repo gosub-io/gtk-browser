@@ -196,7 +196,13 @@ internal sealed class TabStrip : UserControl
         menu.Items.Add(Item("New Tab to the Right", () => NewTabRequested?.Invoke()));
         menu.Items.Add(Item("Duplicate Tab", () => DuplicateRequested?.Invoke(tab)));
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Reload", () => _browser?.Reload(tab, false)));
+        // beacon_reload acts on the active tab and the ABI has no per-tab reload, so the tab
+        // is brought forward first; otherwise this would reload whichever tab is showing.
+        menu.Items.Add(Item("Reload", () =>
+        {
+            TabActivated?.Invoke(tab);
+            _browser?.Reload();
+        }));
         menu.Items.Add(Item("View Source", () => ViewSourceRequested?.Invoke(tab)));
         menu.Items.Add(new Separator());
         menu.Items.Add(Item(pinned ? "Unpin Tab" : "Pin Tab", () =>

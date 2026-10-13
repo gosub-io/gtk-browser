@@ -526,7 +526,7 @@ public partial class MainWindow : Window
 
         var view = new MenuItem { Header = "_View" };
         view.Items.Add(MenuItemFor("_Reload\tF5", () => _browser.Reload()));
-        view.Items.Add(MenuItemFor("Reload Ignoring Cache\tCtrl+F5", () => _browser.Reload(_page.Tab, true)));
+        view.Items.Add(MenuItemFor("Reload Ignoring Cache\tCtrl+F5", () => _browser.Reload(ignoreCache: true)));
         view.Items.Add(MenuItemFor("_Stop\tEsc", () => _browser.Stop()));
         view.Items.Add(new Separator());
         view.Items.Add(MenuItemFor("Zoom _In\tCtrl++", () => SetZoom(_browser.Zoom(_page.Tab) + 0.1f)));
@@ -748,7 +748,7 @@ public partial class MainWindow : Window
                 Activate(_browser.ViewSource(_page.Tab));
                 break;
             case Key.F5 when ctrl:
-                _browser.Reload(_page.Tab, true);
+                _browser.Reload(ignoreCache: true);
                 break;
             case Key.F5:
                 _browser.Reload();
