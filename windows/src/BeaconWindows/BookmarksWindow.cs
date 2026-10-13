@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Gosub.Beacon.Windows.Interop;
 
 namespace Gosub.Beacon.Windows;
@@ -34,6 +35,15 @@ internal sealed class BookmarksWindow : Window
         });
         _list.View = grid;
         _list.MouseDoubleClick += (_, _) => OpenSelected();
+        // Enter opens, as in the History window.
+        _list.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Return)
+            {
+                OpenSelected();
+                e.Handled = true;
+            }
+        };
 
         var open = new Button { Content = "Open", Width = 90, Margin = new Thickness(0, 0, 6, 0) };
         open.Click += (_, _) => OpenSelected();
