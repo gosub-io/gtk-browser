@@ -1416,8 +1416,9 @@ impl BrowserWindow {
             if matches!(property, "url" | "message" | "target" | "subject" | "location") {
                 bindings.push(row.bind_property(property, &label, "tooltip-text").sync_create().build());
             }
-            // A Page report row's kind says what it means on hover.
-            if property == "kind" {
+            // A Page report row's kind says what it means on hover. Network rows have a kind
+            // too, but no hint, and binding a property the row lacks aborts the process.
+            if property == "kind" && row.find_property("hint").is_some() {
                 bindings.push(row.bind_property("hint", &label, "tooltip-text").sync_create().build());
             }
             bindings.push(
