@@ -227,6 +227,10 @@ pub struct BrowserWindow {
     /// Whether the user wants the bookmarks bar. Per window, as on the Mac: fullscreen hides
     /// the whole chrome, and this says whether the bar comes back with it.
     pub bookmarks_bar_wanted: Cell<bool>,
+    /// The bookmark each tab was last sent to from the bookmarks bar, as the store spells
+    /// it. The engine reports the URL it parsed (`https://gosub.io/` for a bookmark saved as
+    /// `https://gosub.io`), so the page's icon finds its bookmark through this instead.
+    bookmark_opened: RefCell<HashMap<TabId, String>>,
     /// The picker a form control asked for, while it is up. Held so a second request closes
     /// the first rather than stacking windows over the page.
     picker: RefCell<Option<crate::picker::PickerHandle>>,
@@ -333,6 +337,7 @@ impl Default for BrowserWindow {
             tab_zoom: RefCell::new(HashMap::new()),
             private: Cell::new(false),
             bookmarks_bar_wanted: Cell::new(true),
+            bookmark_opened: RefCell::new(HashMap::new()),
             picker: RefCell::new(None),
         }
     }
@@ -3505,12 +3510,19 @@ impl BrowserWindow {
             self.bookmarks_bar.remove(&child);
         }
         for bookmark in places.bookmarks() {
+            let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+            if let Some(texture) = bookmark.favicon.as_deref().and_then(decode_favicon) {
+                let img = Image::from_paintable(Some(&texture));
+                img.set_pixel_size(16);
+                content.append(&img);
+            }
+            content.append(&gtk4::Label::new(Some(if bookmark.title.is_empty() {
+                &bookmark.url
+            } else {
+                &bookmark.title
+            })));
             let button = Button::builder()
-                .label(if bookmark.title.is_empty() {
-                    &bookmark.url
-                } else {
-                    &bookmark.title
-                })
+                .child(&content)
                 .has_frame(false)
                 .tooltip_text(&bookmark.url)
                 .build();
@@ -3519,9 +3531,39 @@ impl BrowserWindow {
             button.connect_clicked(move |_| {
                 let imp = window.imp();
                 let Some(tab_id) = imp.active_tab_id() else { return };
+                imp.bookmark_opened.borrow_mut().insert(tab_id, url.clone());
                 let _ = imp.get_sender().send_blocking(Message::LoadUrl(tab_id, url.clone()));
             });
             self.bookmarks_bar.append(&button);
+        }
+    }
+
+    /// Give the page's new icon to its bookmark, if it has one, and redraw the bar when that
+    /// changed it. The bookmark is the one this tab was opened from, while the tab is still
+    /// on that site, or else the one saved under the tab's own URL.
+    fn store_bookmark_favicon(&self, tab_id: TabId) {
+        let Some(places) = self.places() else { return };
+        let Some((url, favicon)) = self
+            .tab_manager
+            .lock()
+            .unwrap()
+            .get_tab(tab_id)
+            .and_then(|tab| Some((tab.url().clone(), tab.favicon()?.to_vec())))
+        else {
+            return;
+        };
+        // The engine checked that it is an image; only one that draws is worth keeping.
+        if decode_favicon(&favicon).is_none() {
+            return;
+        }
+        let opened = self
+            .bookmark_opened
+            .borrow_mut()
+            .remove(&tab_id)
+            .filter(|opened| url::Url::parse(opened).is_ok_and(|opened| opened.host_str() == url.host_str()));
+        let bookmark = opened.or_else(|| places.is_bookmarked(url.as_str()).then(|| url.to_string()));
+        if bookmark.is_some_and(|bookmark| places.set_bookmark_favicon(&bookmark, &favicon)) {
+            self.rebuild_bookmarks_bar();
         }
     }
 
@@ -4631,8 +4673,8 @@ impl BrowserWindow {
                 }
             }
             // The bytes are on the tab; the chip decodes them when it is rebuilt, which
-            // `TabsChanged` asks for.
-            BeaconEvent::FaviconChanged(_) => {}
+            // `TabsChanged` asks for. A bookmarked page's icon also goes to its bookmark.
+            BeaconEvent::FaviconChanged(tab_id) => self.store_bookmark_favicon(tab_id),
             BeaconEvent::NavigationFailed(tab_id, url, error) => self.on_navigation_failed(tab_id, &url, &error),
             BeaconEvent::TabCrashed(tab_id, _) => {
                 self.render_areas.borrow_mut().remove(&tab_id);
