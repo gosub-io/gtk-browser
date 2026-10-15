@@ -2247,6 +2247,7 @@ impl BrowserWindow {
             });
         }
         self.tab_zoom.borrow_mut().remove(&tab_id);
+        self.bookmark_opened.borrow_mut().remove(&tab_id);
         self.forget_mru(tab_id);
         self.refresh_tabs();
     }
@@ -3539,8 +3540,8 @@ impl BrowserWindow {
     }
 
     /// Give the page's new icon to its bookmark, if it has one, and redraw the bar when that
-    /// changed it. The bookmark is the one this tab was opened from, while the tab is still
-    /// on that site, or else the one saved under the tab's own URL.
+    /// changed it. The bookmark is the one this tab was opened from, for as long as the tab
+    /// stays on that site, or else one that names the tab's own URL however it is spelled.
     fn store_bookmark_favicon(&self, tab_id: TabId) {
         let Some(places) = self.places() else { return };
         let Some((url, favicon)) = self
@@ -3556,12 +3557,27 @@ impl BrowserWindow {
         if decode_favicon(&favicon).is_none() {
             return;
         }
-        let opened = self
-            .bookmark_opened
-            .borrow_mut()
-            .remove(&tab_id)
-            .filter(|opened| url::Url::parse(opened).is_ok_and(|opened| same_site(&opened, &url)));
-        let bookmark = opened.or_else(|| places.is_bookmarked(url.as_str()).then(|| url.to_string()));
+        // A page can report a new icon after its first, so the link to the bookmark it was
+        // opened from holds until the tab leaves that site.
+        let opened = {
+            let mut opened = self.bookmark_opened.borrow_mut();
+            let on_site = opened
+                .get(&tab_id)
+                .is_some_and(|bookmark| url::Url::parse(bookmark).is_ok_and(|bookmark| same_site(&bookmark, &url)));
+            if on_site {
+                opened.get(&tab_id).cloned()
+            } else {
+                opened.remove(&tab_id);
+                None
+            }
+        };
+        let bookmark = opened.or_else(|| {
+            places
+                .bookmarks()
+                .into_iter()
+                .find(|bookmark| url::Url::parse(&bookmark.url).is_ok_and(|bookmark| bookmark == url))
+                .map(|bookmark| bookmark.url)
+        });
         if bookmark.is_some_and(|bookmark| places.set_bookmark_favicon(&bookmark, &favicon)) {
             self.rebuild_bookmarks_bar();
         }
