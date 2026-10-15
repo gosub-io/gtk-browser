@@ -3560,7 +3560,7 @@ impl BrowserWindow {
             .bookmark_opened
             .borrow_mut()
             .remove(&tab_id)
-            .filter(|opened| url::Url::parse(opened).is_ok_and(|opened| opened.host_str() == url.host_str()));
+            .filter(|opened| url::Url::parse(opened).is_ok_and(|opened| same_site(&opened, &url)));
         let bookmark = opened.or_else(|| places.is_bookmarked(url.as_str()).then(|| url.to_string()));
         if bookmark.is_some_and(|bookmark| places.set_bookmark_favicon(&bookmark, &favicon)) {
             self.rebuild_bookmarks_bar();
@@ -4717,6 +4717,13 @@ impl BrowserWindow {
             BeaconEvent::Log(message) => self.log(&message),
         }
     }
+}
+
+/// Whether two URLs are on the same site for a bookmark's icon: one host and one port, so
+/// `localhost:3000` and `localhost:4000` are two services. A default port counts as none, so the
+/// `http://a` a bookmark names and the `https://a` it redirects to stay one site.
+fn same_site(a: &url::Url, b: &url::Url) -> bool {
+    a.host_str() == b.host_str() && a.port() == b.port()
 }
 
 /// Map a GDK keyval to the web [`KeyboardEvent.key`] name the engine expects.
