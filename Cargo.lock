@@ -705,6 +705,7 @@ name = "beacon-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "beacon-profile",
  "clap",
  "dirs",
  "gosub_engine",
@@ -796,6 +797,27 @@ name = "beacon-icon"
 version = "0.1.0"
 dependencies = [
  "resvg",
+]
+
+[[package]]
+name = "beacon-profile"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "serde",
+ "tempfile",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "beaconctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "beacon-profile",
+ "clap",
 ]
 
 [[package]]
@@ -2799,12 +2821,11 @@ dependencies = [
 
 [[package]]
 name = "gosub-sonar"
-version = "0.14.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f36d61954017cb65f2a58cfac5e22c3db40cbf8b82776830f88bccc5633b531a"
+checksum = "d6228e9c4f6c09df52b7e962708710655c835125073844863c3d35691550bca1"
 dependencies = [
  "anyhow",
- "async-compression",
  "bytes",
  "chrono",
  "cookie",
@@ -2907,7 +2928,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sys-locale",
  "tempfile",
  "thiserror 2.0.20",
  "time",
