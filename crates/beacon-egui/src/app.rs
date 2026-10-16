@@ -882,7 +882,10 @@ impl eframe::App for BeaconApp {
         }
 
         // ── page ──────────────────────────────────────────────────────────
-        egui::CentralPanel::default().show(ui, |ui| {
+        // No inner margin: the page is the panel. egui's default 8px frame narrowed the page
+        // by 16px, which on a phone is a column of text.
+        let page_frame = egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin::ZERO);
+        egui::CentralPanel::default().frame(page_frame).show(ui, |ui| {
             let size = ui.available_size();
             if size.x > 1.0 && size.y > 1.0 {
                 let wanted = (size.x as u32, size.y as u32);
