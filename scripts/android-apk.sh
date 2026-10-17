@@ -3,9 +3,10 @@
 #
 #   scripts/android-apk.sh [--install] [--debug]
 #
-# Needs: the Android SDK (platform + build-tools), the NDK, `cargo install cargo-ndk`, and
-# `rustup target add aarch64-linux-android`. ANDROID_HOME defaults to ~/Android/Sdk and
-# ANDROID_NDK_HOME to the newest NDK under it. Output: target/android/gosub-beacon.apk.
+# Needs: the Android SDK (platform + build-tools), the NDK, `cargo install cargo-ndk`,
+# `rustup target add aarch64-linux-android`, and a JDK for javac. ANDROID_HOME defaults to
+# ~/Android/Sdk and ANDROID_NDK_HOME to the newest NDK under it. Output:
+# target/android/gosub-beacon.apk.
 set -euo pipefail
 
 INSTALL=0
@@ -68,8 +69,19 @@ if [ ! -f "$KOTLIN_STDLIB" ]; then
     echo "f31cc53f105a7e48c093683bbd5437561d1233920513774b470805641bedbc09  $KOTLIN_STDLIB.part" | sha256sum -c --quiet
     mv "$KOTLIN_STDLIB.part" "$KOTLIN_STDLIB"
 fi
+# Beacon's own Java: the helper behind the date and time dialogs and the Downloads folder
+# (packaging/android/java, called from beacon-egui's android::helper).
+if ! command -v javac >/dev/null; then
+    echo "javac not found; install a JDK (e.g. sudo apt install openjdk-21-jdk-headless)" >&2
+    exit 1
+fi
+mkdir -p "$STAGE/java/helper"
+find "$ROOT/packaging/android/java" -name '*.java' -print0 |
+    xargs -0 javac --release 11 -nowarn -classpath "$PLATFORM/android.jar" -d "$STAGE/java/helper"
+(cd "$STAGE/java/helper" && jar cf "$STAGE/java/helper.jar" .)
+
 "$BUILD_TOOLS/d8" --release --min-api "$MIN_SDK" --lib "$PLATFORM/android.jar" \
-    --output "$STAGE/apk" "$STAGE/java/classes.jar" "$KOTLIN_STDLIB"
+    --output "$STAGE/apk" "$STAGE/java/classes.jar" "$KOTLIN_STDLIB" "$STAGE/java/helper.jar"
 
 (cd "$ROOT" && cargo run -q --release -p beacon-icon -- 192 "$STAGE/res/mipmap-xxxhdpi/ic_launcher.png")
 unzip -q -o "$AAR" 'res/xml/*' -d "$STAGE"

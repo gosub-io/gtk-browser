@@ -25,16 +25,23 @@ impl Platform for EguiPlatform {
     /// is already on disk, and there is nothing useful for them to do about a missing
     /// handler from inside the browser.
     fn open_path(&self, path: &Path) {
-        #[cfg(target_os = "macos")]
-        let program = "open";
-        #[cfg(target_os = "windows")]
-        let program = "explorer";
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        let program = "xdg-open";
+        // There is no opener to shell out to; the system picks the app from the shared copy.
+        #[cfg(target_os = "android")]
+        crate::android::helper::open_download(path);
 
-        match std::process::Command::new(program).arg(path).spawn() {
-            Ok(_) => {}
-            Err(e) => log::warn!("could not open {}: {e}", path.display()),
+        #[cfg(not(target_os = "android"))]
+        {
+            #[cfg(target_os = "macos")]
+            let program = "open";
+            #[cfg(target_os = "windows")]
+            let program = "explorer";
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            let program = "xdg-open";
+
+            match std::process::Command::new(program).arg(path).spawn() {
+                Ok(_) => {}
+                Err(e) => log::warn!("could not open {}: {e}", path.display()),
+            }
         }
     }
 }

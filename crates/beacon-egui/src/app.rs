@@ -123,6 +123,42 @@ pub struct BeaconApp {
     fling: Option<(egui::Vec2, f64)>,
     /// Where the mouse was over the page last frame, so only real movement reaches the engine.
     last_pointer: Option<egui::Pos2>,
+    /// The native date or time dialog open over a form control, and what it is for.
+    #[cfg(target_os = "android")]
+    picker: Option<NativePicker>,
+    /// The download the downloads bar shows; dismissed with its close button.
+    #[cfg(target_os = "android")]
+    download_bar: Option<u64>,
+    /// How far each finished download got on its way into the shared Downloads folder. Written
+    /// from the thread that copies it.
+    #[cfg(target_os = "android")]
+    published: Arc<Mutex<HashMap<u64, Published>>>,
+    #[cfg(target_os = "android")]
+    egui_ctx: egui::Context,
+}
+
+/// A native picker in progress. A date and time control asks for its date first, then its
+/// time; `date` holds the first answer while the second dialog is up.
+#[cfg(target_os = "android")]
+struct NativePicker {
+    tab_id: TabId,
+    kind: beacon_core::event::PickerKind,
+    /// The control's value when it asked, which a cancel puts back.
+    original: String,
+    date: Option<crate::picker_value::Date>,
+    /// Where the time dialog starts.
+    time: Option<crate::picker_value::Time>,
+}
+
+/// A finished download on its way to the shared Downloads folder.
+#[cfg(target_os = "android")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Published {
+    Copying,
+    Done,
+    /// Copying failed, or the system has no shared Downloads collection (before Android 10);
+    /// the file stays in the app's own storage.
+    Failed,
 }
 
 impl BeaconApp {
@@ -193,6 +229,14 @@ impl BeaconApp {
             senders: Default::default(),
             progress: Default::default(),
             activity: None,
+            #[cfg(target_os = "android")]
+            picker: None,
+            #[cfg(target_os = "android")]
+            download_bar: None,
+            #[cfg(target_os = "android")]
+            published: Default::default(),
+            #[cfg(target_os = "android")]
+            egui_ctx: cc.egui_ctx.clone(),
         };
         app.bookmarks = app.engine.places().bookmarks().into_iter().map(|b| (b.title, b.url)).collect();
 
@@ -471,14 +515,33 @@ impl BeaconApp {
                 // state every frame, so these need no separate handling in an immediate-mode
                 // UI -- unlike GTK, where each one has a widget to poke.
                 BeaconEvent::Redraw
-                | BeaconEvent::PickerRequested { .. }
                 | BeaconEvent::TabsChanged
                 | BeaconEvent::ActiveTabChanged(_)
                 | BeaconEvent::TitleChanged(..)
                 | BeaconEvent::LoadingChanged(..)
-                | BeaconEvent::NavStateChanged(_)
-                | BeaconEvent::DownloadOffered { .. }
-                | BeaconEvent::DownloadChanged(_) => {}
+                | BeaconEvent::NavStateChanged(_) => {}
+                #[cfg(target_os = "android")]
+                BeaconEvent::PickerRequested {
+                    tab_id,
+                    kind,
+                    value,
+                    min,
+                    max,
+                    ..
+                } => self.open_picker(tab_id, kind, value, min.as_deref(), max.as_deref()),
+                #[cfg(target_os = "android")]
+                BeaconEvent::DownloadOffered {
+                    tab_id,
+                    offer,
+                    url,
+                    suggested_filename,
+                    ..
+                } => self.accept_download(tab_id, offer, url, &suggested_filename),
+                #[cfg(target_os = "android")]
+                BeaconEvent::DownloadChanged(id) => self.publish_when_finished(id),
+                // The desktop egui frontend has no save dialog or pickers yet.
+                #[cfg(not(target_os = "android"))]
+                BeaconEvent::PickerRequested { .. } | BeaconEvent::DownloadOffered { .. } | BeaconEvent::DownloadChanged(_) => {}
             }
         }
     }
@@ -600,12 +663,237 @@ fn engine_event_name(event: &EngineEvent) -> &'static str {
     }
 }
 
+/// Form pickers and downloads on Android, through the Java helper (see `android::helper`).
+#[cfg(target_os = "android")]
+impl BeaconApp {
+    /// Send `commands` to `tab_id`'s engine tab, in order.
+    fn send_to_tab(&self, tab_id: TabId, commands: Vec<TabCommand>) {
+        let Some(handle) = self.tabs.lock().unwrap().get_tab(tab_id).and_then(|t| t.tab_handle()) else {
+            return;
+        };
+        self.rt.spawn(async move {
+            for command in commands {
+                let _ = handle.send(command).await;
+            }
+        });
+    }
+
+    /// Open the native dialog a date or time control asked for. Colour, month and week have
+    /// no Android dialog, so they are logged and left alone, as GTK does with what it cannot
+    /// draw; the engine draws no picker of its own.
+    fn open_picker(&mut self, tab_id: TabId, kind: beacon_core::event::PickerKind, value: String, min: Option<&str>, max: Option<&str>) {
+        use crate::android::helper;
+        use crate::picker_value as pv;
+        use beacon_core::event::PickerKind;
+
+        let (date, time) = match kind {
+            PickerKind::Date => (pv::parse_date(&value), None),
+            PickerKind::Time => (None, pv::parse_time(&value)),
+            PickerKind::DateTimeLocal => pv::parse_date_time(&value),
+            PickerKind::Color | PickerKind::Month | PickerKind::Week => {
+                self.log.push(format!(
+                    "{kind:?} picker requested (current {value:?}); not available on Android yet"
+                ));
+                return;
+            }
+        };
+        if kind == PickerKind::Time {
+            helper::show_time_picker(time.map(|t| (t.hour, t.minute)));
+        } else {
+            // A date and time control's bounds carry a time too; the dialog bounds the date.
+            let bound = |b: Option<&str>| pv::bound_millis(b.map(|b| b.split('T').next().unwrap_or(b)));
+            helper::show_date_picker(date.map(|d| (d.year, d.month, d.day)), bound(min), bound(max));
+        }
+        self.picker = Some(NativePicker {
+            tab_id,
+            kind,
+            original: value,
+            date: None,
+            time,
+        });
+    }
+
+    /// Hand the open dialog's answer to the control: the value and then the close, as GTK
+    /// does on OK. A cancel answers with the value the control came in with.
+    fn poll_picker(&mut self) {
+        use crate::android::helper;
+        use crate::picker_value as pv;
+        use beacon_core::event::PickerKind;
+
+        let Some(picker) = &mut self.picker else { return };
+        // egui sleeps while nothing happens, and a dialog's answer is not an event it sees.
+        self.egui_ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        let Some(answer) = helper::take_picker_result() else { return };
+        let value = if answer.is_empty() {
+            None
+        } else {
+            match picker.kind {
+                PickerKind::Date => pv::date_from_dialog(&answer).map(pv::format_date),
+                PickerKind::Time => pv::time_from_dialog(&answer).map(pv::format_time),
+                PickerKind::DateTimeLocal => match picker.date {
+                    // The date is in; ask for the time.
+                    None => match pv::date_from_dialog(&answer) {
+                        Some(date) => {
+                            picker.date = Some(date);
+                            helper::show_time_picker(picker.time.map(|t| (t.hour, t.minute)));
+                            return;
+                        }
+                        None => None,
+                    },
+                    Some(date) => pv::time_from_dialog(&answer).map(|time| format!("{}T{}", pv::format_date(date), pv::format_time(time))),
+                },
+                PickerKind::Color | PickerKind::Month | PickerKind::Week => None,
+            }
+        };
+        let Some(picker) = self.picker.take() else { return };
+        let value = value.unwrap_or(picker.original);
+        self.send_to_tab(picker.tab_id, vec![TabCommand::PickerChanged { value }, TabCommand::PickerClosed]);
+    }
+
+    /// Take a download the engine offered. There is no save dialog on a phone: it is written
+    /// to the app's own storage and copied to Downloads once it finishes.
+    fn accept_download(&mut self, tab_id: TabId, offer: gosub_engine::events::DownloadOfferId, url: String, suggested: &str) {
+        let Some(dir) = crate::android::download_dir() else { return };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            log::warn!("cannot create {}: {e}", dir.display());
+            return;
+        }
+        let name = download_name(suggested);
+        // A download's file appears only once the engine starts writing it, so the paths of
+        // the ones already handed out count as taken too.
+        let reserved: Vec<_> = self.beacon.downloads().entries().iter().map(|e| e.path.clone()).collect();
+        let path = free_path(&dir, &name, &reserved);
+        let downloads = self.beacon.downloads_mut();
+        let id = downloads.next_id();
+        downloads.start(id, name, path.clone());
+        self.download_bar = Some(id);
+        self.send_to_tab(
+            tab_id,
+            vec![TabCommand::StartDownload {
+                id: gosub_engine::events::DownloadId(id),
+                url,
+                target_path: path,
+                offer: Some(offer),
+            }],
+        );
+    }
+
+    /// Once download `id` has finished, copy it into the shared Downloads folder, off the UI
+    /// thread. The private copy goes once the shared one is written.
+    fn publish_when_finished(&mut self, id: u64) {
+        let Some(entry) = self.beacon.downloads().get(id) else { return };
+        if entry.state != beacon_core::download::DownloadState::Finished {
+            return;
+        }
+        let mut published = self.published.lock().unwrap();
+        if published.contains_key(&id) {
+            return;
+        }
+        published.insert(id, Published::Copying);
+        drop(published);
+
+        let (path, name) = (entry.path.clone(), entry.filename.clone());
+        let published = self.published.clone();
+        let ctx = self.egui_ctx.clone();
+        std::thread::spawn(move || {
+            let state = if crate::android::helper::publish_download(&path, &name) {
+                let _ = std::fs::remove_file(&path);
+                Published::Done
+            } else {
+                Published::Failed
+            };
+            published.lock().unwrap().insert(id, state);
+            ctx.request_repaint();
+        });
+    }
+
+    /// A strip above the page for the latest download: its progress, then Open once it is in
+    /// Downloads. The close button hides it until the next download.
+    fn downloads_bar(&mut self, ui: &mut egui::Ui) {
+        use beacon_core::download::DownloadState;
+
+        let Some(id) = self.download_bar else { return };
+        let Some(entry) = self.beacon.downloads().get(id).cloned() else {
+            return;
+        };
+        let published = self.published.lock().unwrap().get(&id).copied();
+        let status = match (&entry.state, published) {
+            (DownloadState::Running, _) => match entry.fraction() {
+                Some(f) => format!("{:.0}%", f * 100.0),
+                None => format!("{} KB", entry.received / 1024),
+            },
+            (DownloadState::Failed(error), _) => format!("failed: {error}"),
+            (DownloadState::Finished, Some(Published::Done)) => "in Downloads".to_string(),
+            (DownloadState::Finished, Some(Published::Failed)) => "kept in app storage".to_string(),
+            (DownloadState::Finished, _) => "saving".to_string(),
+        };
+        let mut open = false;
+        let mut close = false;
+        egui::Panel::bottom("downloads")
+            .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(8, 6)))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&entry.filename).strong());
+                    ui.label(status);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        close = ui.add(egui::Button::new("\u{00D7}").frame(false)).clicked();
+                        if published == Some(Published::Done) {
+                            open = ui.button("Open").clicked();
+                        }
+                    });
+                });
+            });
+        if open {
+            self.dispatch(BeaconCommand::OpenDownload(id));
+        }
+        if close {
+            self.download_bar = None;
+        }
+    }
+}
+
+/// A file name for a download: the server's suggestion with anything that would make it a
+/// path taken out.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn download_name(suggested: &str) -> String {
+    let name: String = suggested
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | '\0') { '_' } else { c })
+        .collect();
+    let name = name.trim().trim_start_matches('.');
+    if name.is_empty() {
+        "download".to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+/// `dir/name`, or `dir/name (2)` and up when that is taken, the number before the extension.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn free_path(dir: &std::path::Path, name: &str, reserved: &[std::path::PathBuf]) -> std::path::PathBuf {
+    let free = |p: &std::path::Path| !p.exists() && !reserved.iter().any(|r| r == p);
+    let path = dir.join(name);
+    if free(&path) {
+        return path;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem, format!(".{ext}")),
+        _ => (name, String::new()),
+    };
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| free(p))
+        .unwrap_or(path)
+}
+
 impl eframe::App for BeaconApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Read once: the panel frames below need this while `ui` is borrowed mutably.
         let faint = ui.visuals().faint_bg_color;
         self.pump_engine();
+        #[cfg(target_os = "android")]
+        self.poll_picker();
 
         let Some(active) = self.active() else { return };
 
@@ -875,6 +1163,9 @@ impl eframe::App for BeaconApp {
                 });
         }
 
+        #[cfg(target_os = "android")]
+        self.downloads_bar(ui);
+
         // ── tab list, in place of the page (compact) ──────────────────────
         if self.tab_list_open {
             self.tab_list(ui, &ctx);
@@ -882,7 +1173,10 @@ impl eframe::App for BeaconApp {
         }
 
         // ── page ──────────────────────────────────────────────────────────
-        egui::CentralPanel::default().show(ui, |ui| {
+        // No inner margin: the page is the panel. egui's default 8px frame narrowed the page
+        // by 16px, which on a phone is a column of text.
+        let page_frame = egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin::ZERO);
+        egui::CentralPanel::default().frame(page_frame).show(ui, |ui| {
             let size = ui.available_size();
             if size.x > 1.0 && size.y > 1.0 {
                 let wanted = (size.x as u32, size.y as u32);
@@ -1234,5 +1528,35 @@ impl BeaconApp {
         }
         self.address_bar = url.to_string();
         self.send_active_and_draw(TabCommand::Navigate { url: url.to_string() });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_download_name_cannot_leave_its_folder() {
+        assert_eq!(download_name("report.pdf"), "report.pdf");
+        assert_eq!(download_name("../../etc/passwd"), "_.._etc_passwd");
+        assert_eq!(download_name("a\\b"), "a_b");
+        assert_eq!(download_name(".hidden"), "hidden");
+        assert_eq!(download_name("  "), "download");
+    }
+
+    #[test]
+    fn a_taken_name_gets_a_number_before_its_extension() {
+        let dir = std::env::temp_dir().join(format!("beacon-free-path-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(free_path(&dir, "a.pdf", &[]), dir.join("a.pdf"));
+        std::fs::write(dir.join("a.pdf"), b"").unwrap();
+        assert_eq!(free_path(&dir, "a.pdf", &[]), dir.join("a (2).pdf"));
+        std::fs::write(dir.join("a (2).pdf"), b"").unwrap();
+        assert_eq!(free_path(&dir, "a.pdf", &[]), dir.join("a (3).pdf"));
+        std::fs::write(dir.join("notes"), b"").unwrap();
+        assert_eq!(free_path(&dir, "notes", &[]), dir.join("notes (2)"));
+        // A name handed to a download that has not created its file yet is taken as well.
+        assert_eq!(free_path(&dir, "b.zip", &[dir.join("b.zip")]), dir.join("b (2).zip"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
