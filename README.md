@@ -26,9 +26,10 @@ More in [docs/screenshots](./docs/screenshots/).
   `windows/build.sh`; running it needs Windows. Not built in CI.
 - **Android**: the egui frontend as a NativeActivity (`crates/beacon-android`), built into
   a debug-signed arm64 APK by `scripts/android-apk.sh`. Android 8.0 (API 26) and newer.
-  On top of the desktop egui it has downloads (copied into shared Downloads on Android 10+;
-  older versions keep them in app storage) and the system date and time pickers for form inputs.
-  without component isolation. Not built in CI.
+  On top of the desktop egui it has downloads (copied into the shared Downloads folder on
+  Android 10 and newer; older versions keep them in the app's own storage) and the system
+  date and time pickers for form inputs. The engine runs in-process, without component
+  isolation. Not built in CI.
 
 ## Getting the source
 
