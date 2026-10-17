@@ -86,9 +86,10 @@ One Beacon process opens a profile at a time; a second one on the same profile i
 
 ### Encryption
 
-Where the system has a keychain (Secret Service on Linux, Keychain on macOS, Credential
-Manager on Windows), a profile's databases are encrypted with a key kept there; the first
-start encrypts the ones already on disk. Without a keychain the profile stays unencrypted.
+A profile's databases are always encrypted, with a key kept in the system keychain (Secret
+Service on Linux, Keychain on macOS, Credential Manager on Windows); the first start
+encrypts the ones already on disk. Without a keychain Beacon does not start, Android aside
+(see below): on Linux that means a running Secret Service such as GNOME Keyring or KWallet.
 
 That key never leaves the machine, so an encrypted profile copied elsewhere opens there
 only once it has a passphrase:
@@ -100,8 +101,24 @@ cargo run -p beaconctl -- profile forget work             # drop this machine's 
 cargo run -p beaconctl -- profile remove-passphrase work  # back to this machine only
 ```
 
-The session file and the picker history are not encrypted, nor, on Linux, is the isolated
-build's localStorage (`--isolated` keeps it in file areas there, not SQLite).
+On a Mac, `beaconctl` is inside the app: `Gosub Beacon.app/Contents/MacOS/beaconctl`. Use
+that one; the keychain item holding the key trusts it and the app for each other, where a
+`beaconctl` built elsewhere is asked about once per build.
+
+Changing or removing the passphrase re-encrypts the databases under a new key, so an older
+copy of `profile.toml` no longer opens them with the passphrase it carried. If that is
+interrupted, nothing opens the profile until the same command is run again and finishes it.
+
+The session file and the picker history are sealed with the same key. What this protects is
+a profile folder that is copied, synced or backed up: without the key from the keychain or
+the passphrase, nothing in it opens. It does not protect against another process running as
+the same user, which can ask the keychain like Beacon does. Still in plain text: on Linux the
+isolated build's localStorage (`--isolated` keeps it in file areas, not SQLite), the cache
+(outside the profile, and never exported), and whatever blocks of the databases from before
+the first encryption the filesystem has not yet reused. On Android, which has no keychain
+Beacon can use, the key is a file in the app's private storage next to the profile, and the
+app opts out of Android's backup (`allowBackup=false`), since that backup would otherwise be
+the one copy of the profile that carries its key.
 
 ## Building and running on macOS
 

@@ -10,6 +10,11 @@
 //! folder. On a machine whose keychain does not hold the key yet, the passphrase unwraps it
 //! once and the keychain keeps it from then on.
 //!
+//! Changing or removing the passphrase moves the profile to a new key and re-encrypts the
+//! databases with it (`Profile::rotate_key`): re-wrapping the same key would leave every
+//! earlier copy of `profile.toml` able to open them with the passphrase it carried. While a
+//! rotation is under way the new key waits in the keychain's [`Slot::Next`].
+//!
 //! ```toml
 //! [crypto]
 //! version = 1
@@ -17,6 +22,7 @@
 //!
 //! [crypto.passphrase]        # only when a passphrase is set
 //! kdf = "argon2id"
+//! normalization = "nfc"      # how the passphrase is prepared; absent: the bytes as typed
 //! memory_kib = 65536
 //! iterations = 3
 //! parallelism = 1
@@ -31,6 +37,9 @@ use chacha20poly1305::XChaCha20Poly1305;
 use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
+use std::fs;
+use std::path::{Path, PathBuf};
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -40,6 +49,14 @@ pub const CRYPTO_VERSION: u32 = 1;
 
 /// The keychain service every profile key is filed under; the account is `profile-<id>`.
 pub const KEYCHAIN_SERVICE: &str = "gosub-beacon";
+
+/// The first bytes of a file [`ProfileKey::seal`] wrote.
+pub const SEALED_MAGIC: &[u8; 8] = b"GSBSEAL1";
+
+/// Whether `data` is a sealed file, as opposed to one written before Beacon sealed them.
+pub fn is_sealed(data: &[u8]) -> bool {
+    data.starts_with(SEALED_MAGIC)
+}
 
 /// `[crypto]` in `profile.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,12 +73,29 @@ pub struct Crypto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Wrapped {
     pub kdf: String,
+    /// How the passphrase was prepared before the key derivation. A manifest from before
+    /// Beacon normalised passphrases has none, and its passphrase is the bytes as typed.
+    #[serde(default)]
+    pub normalization: Normalization,
     pub memory_kib: u32,
     pub iterations: u32,
     pub parallelism: u32,
     pub salt: String,
     pub nonce: String,
     pub wrapped: String,
+}
+
+/// What is done to a passphrase before it is hashed. Recorded with the wrap, so a wrap made
+/// one way is never read another.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Normalization {
+    /// The bytes as typed. What every wrap before `normalization` was recorded used.
+    #[default]
+    None,
+    /// Unicode NFC, so the passphrase hashes the same however the machine it is typed on
+    /// composes its characters: a copied profile is meant to open on another one.
+    Nfc,
 }
 
 /// Argon2id cost for wrapping with a passphrase.
@@ -155,10 +189,76 @@ impl ProfileKey {
         })
     }
 
-    /// The key for one store's database. Salted with the profile id, so the same key in two
-    /// profiles (a copied folder given a new id) still gives different store keys.
+    /// The key as the keychain files it: hex, so every backend sees text. The Secret
+    /// Service stores a secret as a string on some desktops (KWallet), and raw bytes that
+    /// are not UTF-8 may not come back as they went in.
+    fn filed(&self) -> Zeroizing<String> {
+        Zeroizing::new(hex(self.bytes.as_slice()))
+    }
+
+    /// A key read back from the keychain: the hex [`filed`](Self::filed) writes, or the 32
+    /// raw bytes a build before it filed.
+    fn from_filed(profile: Uuid, secret: &[u8]) -> Result<Self> {
+        if secret.len() == 64 {
+            let text = std::str::from_utf8(secret).map_err(|_| anyhow!("the filed profile key is not hex"))?;
+            return Self::from_bytes(profile, &Zeroizing::new(unhex(text)?));
+        }
+        Self::from_bytes(profile, secret)
+    }
+
+    /// The key for one store's database. Salted with the profile id, so two profiles that
+    /// somehow share key bytes still have different store keys. That makes the id part of
+    /// the key material: it never changes for a folder, or nothing in it would open.
     pub fn store_key(&self, store: Store) -> Zeroizing<[u8; 32]> {
         self.derive(store.info())
+    }
+
+    /// Encrypt one of the profile's small files (the open tabs, the pickers' history): a
+    /// key derived for `name`, XChaCha20-Poly1305 with a random nonce and the name as
+    /// associated data, behind [`SEALED_MAGIC`] so a file from before sealing is told apart.
+    pub fn seal(&self, name: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
+        let key = self.file_key(name);
+        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let sealed = XChaCha20Poly1305::new(key.as_slice().into())
+            .encrypt(
+                &nonce,
+                Payload {
+                    msg: plaintext,
+                    aad: name.as_bytes(),
+                },
+            )
+            .map_err(|_| anyhow!("sealing {name} failed"))?;
+        let mut out = Vec::with_capacity(SEALED_MAGIC.len() + nonce.len() + sealed.len());
+        out.extend_from_slice(SEALED_MAGIC);
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&sealed);
+        Ok(out)
+    }
+
+    /// The plaintext of a file [`seal`](Self::seal) wrote under this key and `name`.
+    pub fn unseal(&self, name: &str, sealed: &[u8]) -> Result<Vec<u8>> {
+        let Some(body) = sealed.strip_prefix(SEALED_MAGIC) else {
+            bail!("{name} is not a sealed file");
+        };
+        if body.len() < 24 {
+            bail!("{name} is cut short");
+        }
+        let (nonce, sealed) = body.split_at(24);
+        XChaCha20Poly1305::new(self.file_key(name).as_slice().into())
+            .decrypt(
+                nonce.into(),
+                Payload {
+                    msg: sealed,
+                    aad: name.as_bytes(),
+                },
+            )
+            .map_err(|_| anyhow!("{name} was not sealed with this profile's key"))
+    }
+
+    fn file_key(&self, name: &str) -> Zeroizing<[u8; 32]> {
+        let mut info = b"gosub-beacon file v1 ".to_vec();
+        info.extend_from_slice(name.as_bytes());
+        self.derive(&info)
     }
 
     fn derive(&self, info: &[u8]) -> Zeroizing<[u8; 32]> {
@@ -184,9 +284,13 @@ impl ProfileKey {
 
     /// Wrap this key with `passphrase` for `profile.toml`.
     pub(crate) fn wrap(&self, passphrase: &str, params: KdfParams) -> Result<Wrapped> {
+        self.wrap_as(passphrase, params, Normalization::Nfc)
+    }
+
+    fn wrap_as(&self, passphrase: &str, params: KdfParams, normalization: Normalization) -> Result<Wrapped> {
         let mut salt = [0u8; 16];
         salt.copy_from_slice(&XChaCha20Poly1305::generate_nonce(&mut OsRng)[..16]);
-        let kek = kek(passphrase, &salt, params)?;
+        let kek = kek(passphrase, normalization, &salt, params)?;
         let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
         let wrapped = XChaCha20Poly1305::new(kek.as_slice().into())
             .encrypt(
@@ -199,6 +303,7 @@ impl ProfileKey {
             .map_err(|_| anyhow!("wrapping the profile key failed"))?;
         Ok(Wrapped {
             kdf: "argon2id".into(),
+            normalization,
             memory_kib: params.memory_kib,
             iterations: params.iterations,
             parallelism: params.parallelism,
@@ -218,7 +323,7 @@ impl ProfileKey {
             iterations: wrapped.iterations,
             parallelism: wrapped.parallelism,
         };
-        let kek = kek(passphrase, &unhex(&wrapped.salt)?, params)?;
+        let kek = kek(passphrase, wrapped.normalization, &unhex(&wrapped.salt)?, params)?;
         let nonce = unhex(&wrapped.nonce)?;
         if nonce.len() != 24 {
             bail!("the wrapped key's nonce is {} bytes, not 24", nonce.len());
@@ -246,7 +351,7 @@ fn aad(profile: Uuid) -> Vec<u8> {
     aad
 }
 
-fn kek(passphrase: &str, salt: &[u8], params: KdfParams) -> Result<Zeroizing<[u8; 32]>> {
+fn kek(passphrase: &str, normalization: Normalization, salt: &[u8], params: KdfParams) -> Result<Zeroizing<[u8; 32]>> {
     let max = KdfParams::MAX;
     if params.memory_kib > max.memory_kib || params.iterations > max.iterations || params.parallelism > max.parallelism {
         bail!(
@@ -262,6 +367,10 @@ fn kek(passphrase: &str, salt: &[u8], params: KdfParams) -> Result<Zeroizing<[u8
     let params = argon2::Params::new(params.memory_kib, params.iterations, params.parallelism, Some(32))
         .map_err(|e| anyhow!("argon2 parameters: {e}"))?;
     let argon = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+    let passphrase: Zeroizing<String> = Zeroizing::new(match normalization {
+        Normalization::None => passphrase.to_string(),
+        Normalization::Nfc => passphrase.nfc().collect(),
+    });
     let mut out = Zeroizing::new([0u8; 32]);
     argon
         .hash_password_into(passphrase.as_bytes(), salt, out.as_mut_slice())
@@ -269,12 +378,23 @@ fn kek(passphrase: &str, salt: &[u8], params: KdfParams) -> Result<Zeroizing<[u8
     Ok(out)
 }
 
+/// Which of a profile's keys the keychain is asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Slot {
+    /// The key the profile is on.
+    Current,
+    /// The key a rotation in progress is moving the profile to. Empty at any other time;
+    /// while it is filled, the databases may be on either key and nothing opens the
+    /// profile until the rotation is finished.
+    Next,
+}
+
 /// Where profile keys are kept on this machine.
 pub trait KeyStore {
-    /// The key filed for `profile`, `Ok(None)` when there is none.
-    fn get(&self, profile: Uuid) -> Result<Option<ProfileKey>>;
-    fn set(&self, key: &ProfileKey) -> Result<()>;
-    fn delete(&self, profile: Uuid) -> Result<()>;
+    /// The key filed for `profile` in `slot`, `Ok(None)` when there is none.
+    fn get(&self, profile: Uuid, slot: Slot) -> Result<Option<ProfileKey>>;
+    fn set(&self, key: &ProfileKey, slot: Slot) -> Result<()>;
+    fn delete(&self, profile: Uuid, slot: Slot) -> Result<()>;
 }
 
 /// The OS keychain: Keychain on macOS, Credential Manager on Windows, the Secret Service
@@ -282,41 +402,80 @@ pub trait KeyStore {
 pub struct OsKeychain;
 
 impl OsKeychain {
-    /// The keychain, or `None` on a platform that has none Beacon can use. Android's
-    /// keystore is not wired up yet; there, profiles stay unencrypted.
+    /// The keychain, or `None` on a platform that has none Beacon can use: Android, where
+    /// the key goes into a [`FileKeyStore`] in the app's private storage instead.
     pub fn new() -> Option<Self> {
         cfg!(any(target_os = "linux", target_os = "macos", target_os = "windows")).then_some(Self)
     }
-}
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-impl OsKeychain {
-    fn entry(profile: Uuid) -> Result<keyring::Entry> {
-        keyring::Entry::new(KEYCHAIN_SERVICE, &format!("profile-{profile}")).context("opening the keychain")
+    /// Keep the keychain from asking the user anything. On macOS a keychain item trusts the
+    /// application that made it, and asks on screen for any other; with no screen (over
+    /// ssh) that call never returns. After this it fails instead, with an error saying to
+    /// run once on the Mac itself. Nothing elsewhere: the other keychains do not ask.
+    pub fn forbid_dialogs() {
+        #[cfg(target_os = "macos")]
+        mac::MacKeychain::forbid_dialogs();
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "macos")]
+mod mac;
+
+#[cfg(target_os = "macos")]
 impl KeyStore for OsKeychain {
-    fn get(&self, profile: Uuid) -> Result<Option<ProfileKey>> {
-        match Self::entry(profile)?.get_secret() {
-            Ok(secret) => {
-                let secret = Zeroizing::new(secret);
-                Ok(Some(ProfileKey::from_bytes(profile, &secret)?))
+    fn get(&self, profile: Uuid, slot: Slot) -> Result<Option<ProfileKey>> {
+        mac::MacKeychain::new().get(profile, slot)
+    }
+
+    fn set(&self, key: &ProfileKey, slot: Slot) -> Result<()> {
+        mac::MacKeychain::new().set(key, slot)
+    }
+
+    fn delete(&self, profile: Uuid, slot: Slot) -> Result<()> {
+        mac::MacKeychain::new().delete(profile, slot)
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+impl OsKeychain {
+    fn entry(profile: Uuid, slot: Slot) -> Result<keyring::Entry> {
+        let account = match slot {
+            Slot::Current => format!("profile-{profile}"),
+            Slot::Next => format!("profile-{profile}.next"),
+        };
+        keyring::Entry::new(KEYCHAIN_SERVICE, &account).context("opening the keychain")
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+impl KeyStore for OsKeychain {
+    fn get(&self, profile: Uuid, slot: Slot) -> Result<Option<ProfileKey>> {
+        let entry = Self::entry(profile, slot)?;
+        // Read as text, the way `set` writes it: on Windows a password is filed as UTF-16,
+        // and the raw blob would not be the hex that went in.
+        match entry.get_password() {
+            Ok(text) => {
+                let text = Zeroizing::new(text);
+                Ok(Some(ProfileKey::from_filed(profile, text.as_bytes())?))
+            }
+            // Not text: the 32 raw bytes a build before this one filed.
+            Err(keyring::Error::BadEncoding(raw)) => {
+                let raw = Zeroizing::new(raw);
+                Ok(Some(ProfileKey::from_filed(profile, &raw)?))
             }
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e).context("reading the profile key from the keychain"),
         }
     }
 
-    fn set(&self, key: &ProfileKey) -> Result<()> {
-        Self::entry(key.profile)?
-            .set_secret(key.bytes.as_slice())
+    fn set(&self, key: &ProfileKey, slot: Slot) -> Result<()> {
+        Self::entry(key.profile, slot)?
+            .set_password(&key.filed())
             .context("storing the profile key in the keychain")
     }
 
-    fn delete(&self, profile: Uuid) -> Result<()> {
-        match Self::entry(profile)?.delete_credential() {
+    fn delete(&self, profile: Uuid, slot: Slot) -> Result<()> {
+        match Self::entry(profile, slot)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(e).context("removing the profile key from the keychain"),
         }
@@ -325,23 +484,98 @@ impl KeyStore for OsKeychain {
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 impl KeyStore for OsKeychain {
-    fn get(&self, _profile: Uuid) -> Result<Option<ProfileKey>> {
+    fn get(&self, _profile: Uuid, _slot: Slot) -> Result<Option<ProfileKey>> {
         Ok(None)
     }
 
-    fn set(&self, _key: &ProfileKey) -> Result<()> {
+    fn set(&self, _key: &ProfileKey, _slot: Slot) -> Result<()> {
         bail!("this platform has no keychain Beacon can use")
     }
 
-    fn delete(&self, _profile: Uuid) -> Result<()> {
+    fn delete(&self, _profile: Uuid, _slot: Slot) -> Result<()> {
         Ok(())
+    }
+}
+
+/// Keys in files of their own, for a platform without a keychain Beacon can use: Android,
+/// where the app's private storage, which no other app reads, stands in for one. The folder
+/// is outside every profile, so a copied profile folder still travels without its key.
+/// Owner-only files, each written whole and renamed into place.
+pub struct FileKeyStore {
+    dir: PathBuf,
+}
+
+impl FileKeyStore {
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self { dir: dir.into() }
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    fn path(&self, profile: Uuid, slot: Slot) -> PathBuf {
+        self.dir.join(match slot {
+            Slot::Current => profile.to_string(),
+            Slot::Next => format!("{profile}.next"),
+        })
+    }
+}
+
+impl KeyStore for FileKeyStore {
+    fn get(&self, profile: Uuid, slot: Slot) -> Result<Option<ProfileKey>> {
+        let path = self.path(profile, slot);
+        match fs::read(&path) {
+            Ok(filed) => {
+                let filed = Zeroizing::new(filed);
+                Ok(Some(ProfileKey::from_filed(profile, &filed)?))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("reading the profile key from {}", path.display())),
+        }
+    }
+
+    fn set(&self, key: &ProfileKey, slot: Slot) -> Result<()> {
+        fs::create_dir_all(&self.dir).with_context(|| format!("creating {}", self.dir.display()))?;
+        let path = self.path(key.profile, slot);
+        // Appended, not swapped in for an extension: `<id>` and `<id>.next` must not share
+        // a temp file.
+        let mut tmp = path.clone().into_os_string();
+        tmp.push(".tmp");
+        let tmp = PathBuf::from(tmp);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            fs::set_permissions(&self.dir, fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("setting the mode of {}", self.dir.display()))?;
+            options.mode(0o600);
+        }
+        {
+            use std::io::Write;
+            let mut file = options.open(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
+            file.write_all(key.filed().as_bytes())
+                .and_then(|()| file.sync_all())
+                .with_context(|| format!("writing {}", tmp.display()))?;
+        }
+        fs::rename(&tmp, &path).with_context(|| format!("writing {}", path.display()))
+    }
+
+    fn delete(&self, profile: Uuid, slot: Slot) -> Result<()> {
+        let path = self.path(profile, slot);
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e).with_context(|| format!("removing {}", path.display())),
+        }
     }
 }
 
 /// A keychain in memory, for tests.
 #[derive(Default)]
 pub struct MemoryKeyStore {
-    keys: std::sync::Mutex<std::collections::HashMap<Uuid, ProfileKey>>,
+    keys: std::sync::Mutex<std::collections::HashMap<(Uuid, Slot), ProfileKey>>,
     refuse: bool,
 }
 
@@ -356,26 +590,32 @@ impl MemoryKeyStore {
 }
 
 impl KeyStore for MemoryKeyStore {
-    fn get(&self, profile: Uuid) -> Result<Option<ProfileKey>> {
-        Ok(self.keys.lock().unwrap().get(&profile).cloned())
+    fn get(&self, profile: Uuid, slot: Slot) -> Result<Option<ProfileKey>> {
+        Ok(self.keys.lock().unwrap().get(&(profile, slot)).cloned())
     }
 
-    fn set(&self, key: &ProfileKey) -> Result<()> {
+    fn set(&self, key: &ProfileKey, slot: Slot) -> Result<()> {
         if self.refuse {
             bail!("keychain unavailable");
         }
-        self.keys.lock().unwrap().insert(key.profile, key.clone());
+        self.keys.lock().unwrap().insert((key.profile, slot), key.clone());
         Ok(())
     }
 
-    fn delete(&self, profile: Uuid) -> Result<()> {
-        self.keys.lock().unwrap().remove(&profile);
+    fn delete(&self, profile: Uuid, slot: Slot) -> Result<()> {
+        self.keys.lock().unwrap().remove(&(profile, slot));
         Ok(())
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+/// Hex, built in place: no per-byte temporaries, since the input may be the key itself.
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(char::from_digit(u32::from(b >> 4), 16).unwrap_or('0'));
+        s.push(char::from_digit(u32::from(b & 0xf), 16).unwrap_or('0'));
+    }
+    s
 }
 
 fn unhex(s: &str) -> Result<Vec<u8>> {
@@ -426,12 +666,90 @@ mod tests {
     }
 
     #[test]
+    fn a_sealed_file_opens_only_under_its_key_and_name() {
+        let id = Uuid::new_v4();
+        let key = ProfileKey::generate(id);
+        let sealed = key.seal("session.tabs", b"*https://example.org/\n").unwrap();
+        assert!(is_sealed(&sealed));
+        assert!(!sealed.windows(7).any(|w| w == b"example"));
+        assert_eq!(key.unseal("session.tabs", &sealed).unwrap(), b"*https://example.org/\n");
+        assert!(key.unseal("picker-clock.txt", &sealed).is_err());
+        assert!(ProfileKey::generate(id).unseal("session.tabs", &sealed).is_err());
+        assert!(key.unseal("session.tabs", b"plain text").is_err());
+        assert!(key.unseal("session.tabs", &sealed[..20]).is_err());
+        // Two seals of the same bytes differ: the nonce is fresh each time.
+        assert_ne!(key.seal("session.tabs", b"x").unwrap(), key.seal("session.tabs", b"x").unwrap());
+    }
+
+    #[test]
+    fn file_key_store_keeps_keys_in_private_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FileKeyStore::new(tmp.path().join("keys"));
+        let id = Uuid::new_v4();
+        assert!(store.get(id, Slot::Current).unwrap().is_none());
+        let key = ProfileKey::generate(id);
+        store.set(&key, Slot::Current).unwrap();
+        store.set(&ProfileKey::generate(id), Slot::Next).unwrap();
+        assert_eq!(*store.get(id, Slot::Current).unwrap().unwrap().bytes, *key.bytes);
+        assert_ne!(*store.get(id, Slot::Next).unwrap().unwrap().bytes, *key.bytes);
+        let filed = std::fs::read_to_string(tmp.path().join("keys").join(id.to_string())).unwrap();
+        assert_eq!(filed, *key.filed());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&tmp.path().join("keys")), 0o700);
+            assert_eq!(mode(&tmp.path().join("keys").join(id.to_string())), 0o600);
+        }
+        store.delete(id, Slot::Next).unwrap();
+        store.delete(id, Slot::Next).unwrap();
+        assert!(store.get(id, Slot::Next).unwrap().is_none());
+        assert!(store.get(id, Slot::Current).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_passphrase_opens_however_its_characters_are_composed() {
+        let id = Uuid::new_v4();
+        let key = ProfileKey::generate(id);
+        // "café" with a precomposed é, then with e plus a combining acute.
+        let wrapped = key.wrap("caf\u{e9}", TEST_KDF).unwrap();
+        let back = ProfileKey::unwrap(id, &wrapped, "cafe\u{301}").unwrap();
+        assert_eq!(back.check(), key.check());
+        assert!(ProfileKey::unwrap(id, &wrapped, "cafe").is_err());
+        assert_eq!(wrapped.normalization, Normalization::Nfc);
+
+        // A wrap from before normalisation was recorded takes the bytes as typed, and a
+        // manifest without the field reads as one.
+        let legacy = key.wrap_as("cafe\u{301}", TEST_KDF, Normalization::None).unwrap();
+        let mut toml_text = toml::to_string(&legacy).unwrap();
+        assert!(toml_text.contains("normalization = \"none\""));
+        toml_text = toml_text.replace("normalization = \"none\"\n", "");
+        let read: Wrapped = toml::from_str(&toml_text).unwrap();
+        assert_eq!(read, legacy);
+        assert_eq!(ProfileKey::unwrap(id, &read, "cafe\u{301}").unwrap().check(), key.check());
+        assert!(ProfileKey::unwrap(id, &read, "caf\u{e9}").is_err());
+    }
+
+    #[test]
     fn a_wrapped_key_asking_too_much_is_refused_before_hashing() {
         let id = Uuid::new_v4();
         let mut wrapped = ProfileKey::generate(id).wrap("pw", TEST_KDF).unwrap();
         wrapped.memory_kib = u32::MAX;
         let err = ProfileKey::unwrap(id, &wrapped, "pw").unwrap_err();
         assert!(err.to_string().contains("beyond what Beacon accepts"), "{err}");
+    }
+
+    #[test]
+    fn a_filed_key_reads_back_from_hex_or_raw_bytes() {
+        let id = Uuid::new_v4();
+        let key = ProfileKey::generate(id);
+        let filed = key.filed();
+        assert_eq!(filed.len(), 64);
+        assert!(filed.is_ascii());
+        assert_eq!(*ProfileKey::from_filed(id, filed.as_bytes()).unwrap().bytes, *key.bytes);
+        assert_eq!(*ProfileKey::from_filed(id, key.bytes.as_slice()).unwrap().bytes, *key.bytes);
+        assert!(ProfileKey::from_filed(id, &[b'z'; 64]).is_err());
+        assert!(ProfileKey::from_filed(id, &[1; 31]).is_err());
     }
 
     #[test]

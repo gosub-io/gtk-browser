@@ -24,11 +24,12 @@
 pub mod crypto;
 
 use anyhow::{anyhow, bail, Context, Result};
-use crypto::{Crypto, KdfParams, KeyStore, ProfileKey, CRYPTO_VERSION};
+use crypto::{Crypto, KdfParams, KeyStore, ProfileKey, Slot, Store, CRYPTO_VERSION};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 /// The newest manifest layout this build understands. A profile written by a newer Beacon
 /// is refused rather than opened, so an older build cannot quietly damage it. Layout 2 adds
@@ -47,7 +48,8 @@ pub const LEGACY_ZONE: Uuid = Uuid::from_u128(0xf1234567_abcd_4000_8000_00000000
 /// Bumped when the cache layout changes; a cache with another stamp is thrown away.
 const CACHE_VERSION: &str = "1";
 
-const MANIFEST: &str = "profile.toml";
+/// The file that makes a folder a profile.
+pub const MANIFEST: &str = "profile.toml";
 const LOCK: &str = "lock";
 const DEFAULTS: &str = "profiles.toml";
 
@@ -69,10 +71,18 @@ const LEGACY_FILES: &[&str] = &[
 /// Left behind by the shell-side fetcher Beacon dropped; nothing reads it.
 const STALE_FILES: &[&str] = &["fetcher-cookies.db"];
 
+/// The small files beside the databases, each sealed with the profile key
+/// ([`ProfileKey::seal`]): the open tabs and the pickers' history. Read and written through
+/// [`Profile::read_sealed`] and [`Profile::write_sealed`].
+pub const SEALED_FILES: &[&str] = &["session.tabs", "picker-swatches.txt", "picker-clock.txt"];
+
 /// `profile.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub schema: u32,
+    /// Never changes for a folder: it salts every key derived from the profile key, binds
+    /// the passphrase-wrapped key, and names the keychain entry. A folder given a new id
+    /// would open nothing.
     pub id: Uuid,
     pub name: String,
     /// The Beacon version that created the profile.
@@ -184,12 +194,17 @@ impl Roots {
             if !dir.is_dir() {
                 continue;
             }
-            if let Some(manifest) = Manifest::read(&dir)? {
-                out.push(Profile {
+            match Manifest::read(&dir)? {
+                Some(manifest) => out.push(Profile {
                     cache_dir: self.cache.join(manifest.id.to_string()),
                     dir,
                     manifest,
-                });
+                }),
+                None if holds_encrypted_stores(&dir) || holds_legacy_files(&dir) => log::warn!(
+                    "{} holds a profile's files but no {MANIFEST}, so it is skipped; restore the manifest from a backup to get the profile back",
+                    dir.display()
+                ),
+                None => {}
             }
         }
         out.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
@@ -332,11 +347,32 @@ impl Profile {
 
     /// `dir` as a profile, writing a manifest when it has none. A folder already holding
     /// the old flat layout keeps the old zone id, so its cookies and storage still match.
+    /// The profile already in `dir`, as it is: nothing is created or written, so it is safe
+    /// to read one Beacon has open.
+    pub fn at(dir: &Path, cache_root: &Path) -> Result<Self> {
+        let Some(manifest) = Manifest::read(dir)? else {
+            bail!("{} holds no profile", dir.display());
+        };
+        Ok(Self {
+            cache_dir: cache_root.join(manifest.id.to_string()),
+            dir: dir.to_path_buf(),
+            manifest,
+        })
+    }
+
     fn adopt(dir: &Path, cache_root: &Path, version: &str) -> Result<Self> {
         make_private_dir(dir)?;
         let manifest = match Manifest::read(dir)? {
             Some(manifest) => manifest,
             None => {
+                // A new manifest is a new id, and the id is key material: the databases
+                // already encrypted here would open under no key after it.
+                if holds_encrypted_stores(dir) {
+                    bail!(
+                        "{} holds encrypted databases but no {MANIFEST}; restore the manifest from a backup, since a new one would give the profile an id its key does not open under",
+                        dir.display()
+                    );
+                }
                 let zone = if holds_legacy_files(dir) { LEGACY_ZONE } else { Uuid::new_v4() };
                 let name = dir.file_name().map_or("profile".into(), |n| n.to_string_lossy().into_owned());
                 let manifest = Manifest::new(&name, zone, version);
@@ -423,69 +459,185 @@ impl Profile {
 
 /// Unlocking: what the databases are encrypted with.
 impl Profile {
-    /// The key this profile's databases are encrypted with, or `None` when they are not.
-    /// Call with the profile locked.
+    /// The key this profile's databases are encrypted with. Call with the profile locked.
     ///
-    /// A profile without `[crypto]` gets a new key here when `keys` can store one, and is
-    /// from then on encrypted; the caller encrypts the existing plaintext databases. With no
-    /// keychain, or one that refuses the key, it stays plaintext and `Ok(None)` comes back.
+    /// A profile without `[crypto]` gets a key here, and the caller encrypts the plaintext
+    /// databases already in it. Every profile is encrypted: with no keychain, or one that
+    /// does not keep the key, this is an error and the profile does not open.
+    ///
+    /// The key is a new one only when the keychain holds none for this profile. One it
+    /// does hold is adopted as it is: the manifest lost its `[crypto]` (restored from a
+    /// backup, a sync conflict, a crash between filing the key and writing the manifest),
+    /// and a fresh key filed over it would leave the databases it encrypted unopenable
+    /// for good. Databases that are already encrypted with no key anywhere are refused for
+    /// the same reason, rather than written off as something to encrypt around.
     ///
     /// An encrypted profile needs its key from `keys`. When the keychain does not hold it
     /// (a profile copied from another machine), the error is a [`Locked`]: unlock it with
     /// the passphrase first ([`Profile::unlock_with_passphrase`]).
-    pub fn unlock(&mut self, keys: Option<&dyn KeyStore>) -> Result<Option<ProfileKey>> {
+    pub fn unlock(&mut self, keys: Option<&dyn KeyStore>) -> Result<ProfileKey> {
         if self.manifest.crypto.is_some() {
-            return self.key_from(keys).map(Some);
+            return self.key_from(keys);
         }
-        let Some(keys) = keys else { return Ok(None) };
-        let key = ProfileKey::generate(self.id());
-        match file_key(keys, self.id(), &key) {
-            Ok(true) => {}
-            Ok(false) => {
-                log::warn!(
-                    "the keychain did not keep the key for profile {:?}; it stays unencrypted",
-                    self.name()
-                );
-                return Ok(None);
+        let Some(keys) = keys else {
+            bail!(
+                "profile {:?} cannot be encrypted: this platform has no keychain Beacon can use",
+                self.name()
+            );
+        };
+        // A rotation that stopped partway leaves the stores split across two keys; a
+        // manifest rolled back to before `[crypto]` must not quietly settle on one of them.
+        self.ensure_not_rotating(keys)?;
+        let key = match keys.get(self.id(), Slot::Current)? {
+            Some(key) => key,
+            None if self.has_encrypted_store() => bail!(
+                "profile {:?} has encrypted databases, but its manifest does not say so and this machine's keychain has no key for it; \
+                 restore {MANIFEST} from the machine that encrypted it",
+                self.name()
+            ),
+            None => {
+                let key = ProfileKey::generate(self.id());
+                let kept = file_key(keys, self.id(), &key)
+                    .with_context(|| format!("profile {:?} cannot be encrypted: no keychain to keep its key", self.name()))?;
+                if !kept {
+                    bail!("profile {:?} cannot be encrypted: the keychain did not keep its key", self.name());
+                }
+                key
             }
-            Err(e) => {
-                log::warn!("no keychain for profile {:?}, it stays unencrypted: {e:#}", self.name());
-                return Ok(None);
-            }
-        }
+        };
         self.manifest.crypto = Some(key.manifest_entry());
         self.manifest.schema = self.manifest.schema.max(SCHEMA_CRYPTO);
         self.manifest.write(&self.dir)?;
-        Ok(Some(key))
+        Ok(key)
     }
 
     /// The key of an encrypted profile, from the keychain, checked against the manifest.
     pub fn key_from(&self, keys: Option<&dyn KeyStore>) -> Result<ProfileKey> {
         let crypto = self.crypto()?;
-        let found = match keys {
-            Some(keys) => keys.get(self.id())?,
+        let Some(keys) = keys else {
+            return Err(self.locked(crypto, false));
+        };
+        self.ensure_not_rotating(keys)?;
+        match keys.get(self.id(), Slot::Current)? {
+            Some(key) if key.check() == crypto.check => Ok(key),
+            Some(_) => Err(self.locked(crypto, true)),
+            None => Err(self.locked(crypto, false)),
+        }
+    }
+
+    fn locked(&self, crypto: &Crypto, stale: bool) -> anyhow::Error {
+        anyhow!(Locked {
+            id: self.id(),
+            name: self.name().to_string(),
+            passphrase: crypto.passphrase.is_some(),
+            stale,
+        })
+    }
+
+    /// Whether a key rotation of this profile was started and not finished: until
+    /// [`Profile::rotate_key`] is called again, the databases may be on either key.
+    pub fn rotation_pending(&self, keys: &dyn KeyStore) -> Result<bool> {
+        Ok(keys.get(self.id(), Slot::Next)?.is_some())
+    }
+
+    /// [`Rotating`] as an error when [`Profile::rotation_pending`].
+    pub fn ensure_not_rotating(&self, keys: &dyn KeyStore) -> Result<()> {
+        if self.rotation_pending(keys)? {
+            bail!(Rotating {
+                id: self.id(),
+                name: self.name().to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Move the profile to a new key: the databases are re-encrypted with it, the keychain
+    /// holds it, and the manifest carries `passphrase` wrapped around it, or no passphrase
+    /// at all. This is what changing or removing the passphrase does, since re-wrapping
+    /// the same key would leave every earlier copy of `profile.toml` able to open the
+    /// databases with the passphrase it carried.
+    ///
+    /// `rekey` is handed each store file that exists with its old and new store key, and
+    /// must make it open with the new one: re-encrypt it when it opens with the old key,
+    /// leave it when it already opens with the new one, and fail on one that opens with
+    /// neither. The [`SEALED_FILES`] are re-sealed here, since this crate holds that cipher.
+    /// The new key is filed in the keychain's [`Slot::Next`] before the first file is
+    /// touched and the manifest is written before the current slot moves, so a rotation
+    /// that stops partway (a crash, a failing `rekey`) loses nothing: until it is called
+    /// again and finishes, every way into the profile reports [`Rotating`]. Call with the
+    /// profile locked.
+    pub fn rotate_key(
+        &mut self,
+        keys: &dyn KeyStore,
+        passphrase: Option<&str>,
+        params: KdfParams,
+        rekey: &mut Rekey<'_>,
+    ) -> Result<ProfileKey> {
+        if passphrase == Some("") {
+            bail!("an empty passphrase protects nothing");
+        }
+        // A manifest with `[crypto]` must be one this build understands. One without is
+        // only acceptable while a rotation waits to be finished: rolled back to before the
+        // profile was encrypted, it gets its `[crypto]` back below, from the new key.
+        let crypto = match &self.manifest.crypto {
+            Some(_) => Some(self.crypto()?.clone()),
             None => None,
         };
-        match found {
-            Some(key) if key.check() == crypto.check => Ok(key),
-            Some(_) => Err(anyhow!(Locked {
-                id: self.id(),
-                name: self.name().to_string(),
-                passphrase: crypto.passphrase.is_some(),
-                stale: true,
-            })),
-            None => Err(anyhow!(Locked {
-                id: self.id(),
-                name: self.name().to_string(),
-                passphrase: crypto.passphrase.is_some(),
-                stale: false,
-            })),
+        let next = keys.get(self.id(), Slot::Next)?;
+        let Some(old) = keys.get(self.id(), Slot::Current)? else {
+            return Err(match &crypto {
+                Some(crypto) => self.locked(crypto, false),
+                None => anyhow!("profile {:?} has no key in this machine's keychain", self.name()),
+            });
+        };
+        let new = match next {
+            // Picking up where an earlier call stopped: the two keys are in the keychain,
+            // whatever the manifest says.
+            Some(new) => new,
+            None => {
+                let Some(crypto) = &crypto else {
+                    bail!("profile {:?} is not encrypted", self.name());
+                };
+                if old.check() != crypto.check {
+                    return Err(self.locked(crypto, true));
+                }
+                let new = ProfileKey::generate(self.id());
+                keys.set(&new, Slot::Next)?;
+                let kept = keys.get(self.id(), Slot::Next)?.is_some_and(|back| back.check() == new.check());
+                if !kept {
+                    bail!("the keychain did not keep the new key for profile {:?}", self.name());
+                }
+                new
+            }
+        };
+        for store in Store::ALL {
+            let path = self.dir.join(store.file_name());
+            if path.exists() {
+                rekey(&path, &old.store_key(store), &new.store_key(store)).with_context(|| format!("re-encrypting {}", path.display()))?;
+            }
         }
+        for name in SEALED_FILES {
+            self.reseal(name, &old, &new)
+                .with_context(|| format!("re-encrypting {}", self.dir.join(name).display()))?;
+        }
+        self.manifest.crypto = Some(Crypto {
+            version: CRYPTO_VERSION,
+            check: new.check(),
+            passphrase: passphrase.map(|p| new.wrap(p, params)).transpose()?,
+        });
+        self.manifest.schema = self.manifest.schema.max(SCHEMA_CRYPTO);
+        self.manifest.write(&self.dir)?;
+        if !file_key(keys, self.id(), &new)? {
+            bail!("the keychain did not keep the key for profile {:?}", self.name());
+        }
+        keys.delete(self.id(), Slot::Next)?;
+        Ok(new)
     }
 
     /// Unwrap the profile key with `passphrase` and file it in `keys`, so later runs open
     /// the profile without asking. Call with the profile locked.
     pub fn unlock_with_passphrase(&self, keys: &dyn KeyStore, passphrase: &str) -> Result<ProfileKey> {
+        self.ensure_not_rotating(keys)?;
         let key = self.key_from_passphrase(passphrase)?;
         if !file_key(keys, self.id(), &key)? {
             bail!("the keychain did not keep the key for profile {:?}", self.name());
@@ -507,13 +659,18 @@ impl Profile {
         Ok(key)
     }
 
-    /// Wrap `key` with `passphrase` into the manifest, replacing any passphrase it had.
-    /// The profile can then be opened on another machine. Call with the profile locked.
+    /// Wrap `key` with `passphrase` into the manifest of a profile that has none yet. The
+    /// profile can then be opened on another machine. Changing a passphrase is
+    /// [`Profile::rotate_key`]'s: with one set already, there is a wrapped key out there to
+    /// revoke, and this would not. Call with the profile locked.
     pub fn set_passphrase(&mut self, key: &ProfileKey, passphrase: &str, params: KdfParams) -> Result<()> {
         if passphrase.is_empty() {
             bail!("an empty passphrase protects nothing");
         }
         let crypto = self.crypto()?;
+        if crypto.passphrase.is_some() {
+            bail!("profile {:?} has a passphrase; changing it means a new key", self.name());
+        }
         if key.check() != crypto.check {
             bail!("that key is not profile {:?}'s", self.name());
         }
@@ -524,13 +681,74 @@ impl Profile {
         self.manifest.write(&self.dir)
     }
 
-    /// Drop the passphrase: the profile opens only where the keychain holds its key.
-    pub fn remove_passphrase(&mut self) -> Result<()> {
-        self.crypto()?;
-        if let Some(crypto) = &mut self.manifest.crypto {
-            crypto.passphrase = None;
+    /// Whether the manifest carries a passphrase-wrapped key.
+    pub fn has_passphrase(&self) -> bool {
+        self.manifest.crypto.as_ref().is_some_and(|c| c.passphrase.is_some())
+    }
+
+    /// Whether any store in the folder is a database that is not plaintext SQLite.
+    fn has_encrypted_store(&self) -> bool {
+        holds_encrypted_stores(&self.dir)
+    }
+}
+
+/// The sealed files: the small ones beside the databases, encrypted with the profile key.
+impl Profile {
+    /// `name`, one of [`SEALED_FILES`], decrypted; `None` when there is none. A file written
+    /// before Beacon sealed these is read as it is, and the next write seals it.
+    pub fn read_sealed(&self, key: &ProfileKey, name: &str) -> Result<Option<Vec<u8>>> {
+        let path = self.dir.join(name);
+        let data = match fs::read(&path) {
+            Ok(data) => data,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+        };
+        if crypto::is_sealed(&data) {
+            return Ok(Some(
+                key.unseal(name, &data).with_context(|| format!("opening {}", path.display()))?,
+            ));
         }
-        self.manifest.write(&self.dir)
+        Ok(Some(data))
+    }
+
+    /// Write `name`, one of [`SEALED_FILES`], sealed with `key`.
+    pub fn write_sealed(&self, key: &ProfileKey, name: &str, plaintext: &[u8]) -> Result<()> {
+        write_atomic(&self.dir.join(name), &key.seal(name, plaintext)?)
+    }
+
+    /// Seal every one of [`SEALED_FILES`] still in plaintext: what a profile holds when it
+    /// gets its key, or what a Beacon from before sealing wrote. Safe to run on every start.
+    pub fn seal_plaintext_files(&self, key: &ProfileKey) -> Result<()> {
+        for name in SEALED_FILES {
+            let path = self.dir.join(name);
+            match fs::read(&path) {
+                Ok(data) if !crypto::is_sealed(&data) => write_atomic(&path, &key.seal(name, &data)?)?,
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+            }
+        }
+        Ok(())
+    }
+
+    /// Move `name` from `old` to `new` for [`Profile::rotate_key`]: nothing when it is
+    /// missing or already on `new`; a plaintext one is sealed on the way.
+    fn reseal(&self, name: &str, old: &ProfileKey, new: &ProfileKey) -> Result<()> {
+        let path = self.dir.join(name);
+        let data = match fs::read(&path) {
+            Ok(data) => data,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+        };
+        let plaintext = if crypto::is_sealed(&data) {
+            if new.unseal(name, &data).is_ok() {
+                return Ok(());
+            }
+            old.unseal(name, &data)?
+        } else {
+            data
+        };
+        write_atomic(&path, &new.seal(name, &plaintext)?)
     }
 
     fn crypto(&self) -> Result<&Crypto> {
@@ -547,6 +765,10 @@ impl Profile {
         Ok(crypto)
     }
 }
+
+/// What [`Profile::rotate_key`] re-encrypts one store file with: the file, the store key it
+/// is on and the one it must end up on. See there for what it has to do.
+pub type Rekey<'a> = dyn FnMut(&Path, &Zeroizing<[u8; 32]>, &Zeroizing<[u8; 32]>) -> Result<()> + 'a;
 
 /// An encrypted profile whose key this machine's keychain does not have (or has a stale
 /// one of). Find it with `err.downcast_ref::<Locked>()`.
@@ -568,13 +790,11 @@ impl std::fmt::Display for Locked {
             "its key is not in this machine's keychain"
         };
         if self.passphrase {
-            // The name when it can be pasted into a shell as it is, the id otherwise.
-            let plain = !self.name.starts_with('-') && self.name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
-            let arg = if plain { self.name.clone() } else { self.id.to_string() };
             write!(
                 f,
-                "profile {:?} is encrypted and {held}; unlock it with `beaconctl profile unlock {arg}`",
-                self.name
+                "profile {:?} is encrypted and {held}; unlock it with `beaconctl profile unlock {}`",
+                self.name,
+                shell_arg(&self.name, self.id)
             )
         } else {
             write!(
@@ -588,11 +808,45 @@ impl std::fmt::Display for Locked {
 
 impl std::error::Error for Locked {}
 
-/// File `key` in `keys` and read it back: a keychain that accepts a key and loses it would
-/// leave databases nothing can open. `Ok(false)` when it did not keep it.
+/// A key rotation ([`Profile::rotate_key`]) that was started and not finished. The new key
+/// is in the keychain's [`Slot::Next`], and the databases may be on either key; calling
+/// `rotate_key` again finishes it. Find it with `err.downcast_ref::<Rotating>()`.
+#[derive(Debug)]
+pub struct Rotating {
+    pub id: Uuid,
+    pub name: String,
+}
+
+impl std::fmt::Display for Rotating {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "profile {:?} is partway through a key rotation that was interrupted; run `beaconctl profile passphrase {}` (or `remove-passphrase`) again to finish it",
+            self.name,
+            shell_arg(&self.name, self.id)
+        )
+    }
+}
+
+impl std::error::Error for Rotating {}
+
+/// How a hint names the profile: the name when it can be pasted into a shell as it is, the
+/// id otherwise.
+fn shell_arg(name: &str, id: Uuid) -> String {
+    let plain = !name.starts_with('-') && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    if plain {
+        name.to_string()
+    } else {
+        id.to_string()
+    }
+}
+
+/// File `key` in `keys` as the profile's current key and read it back: a keychain that
+/// accepts a key and loses it would leave databases nothing can open. `Ok(false)` when it
+/// did not keep it.
 fn file_key(keys: &dyn KeyStore, profile: Uuid, key: &ProfileKey) -> Result<bool> {
-    keys.set(key)?;
-    Ok(keys.get(profile)?.is_some_and(|back| back.check() == key.check()))
+    keys.set(key, Slot::Current)?;
+    Ok(keys.get(profile, Slot::Current)?.is_some_and(|back| back.check() == key.check()))
 }
 
 /// Held for as long as a process uses a profile.
@@ -605,8 +859,27 @@ fn holds_legacy_files(dir: &Path) -> bool {
     LEGACY_FILES.iter().any(|name| dir.join(name).exists())
 }
 
-/// Create `dir` and make it readable by the owner only: an unencrypted profile holds cookies
-/// in plain text, and even an encrypted one its session file and picker history; the folder mode is what keeps other users out of every file inside.
+/// Whether any store in `dir` is a database that is not plaintext SQLite. Judged by the file
+/// header alone, as the engine judges what to encrypt: this crate does not open databases.
+fn holds_encrypted_stores(dir: &Path) -> bool {
+    Store::ALL.iter().any(|store| is_encrypted_database(&dir.join(store.file_name())))
+}
+
+/// Whether `path` holds a database that is not plaintext SQLite: a full header that is not
+/// SQLite's. A missing, empty or short file is nothing at all, and an unreadable one is
+/// left for whatever opens it to report.
+fn is_encrypted_database(path: &Path) -> bool {
+    use std::io::Read;
+    let mut header = [0u8; 16];
+    match File::open(path).and_then(|mut f| f.read_exact(&mut header)) {
+        Ok(()) => &header != b"SQLite format 3\0",
+        Err(_) => false,
+    }
+}
+
+/// Create `dir` and make it readable by the owner only: a profile's files are in plain text
+/// until its first keyed start encrypts them, and the lock and manifest always are; the
+/// folder mode is what keeps other users out of every file inside.
 fn make_private_dir(dir: &Path) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     #[cfg(unix)]
@@ -618,9 +891,9 @@ fn make_private_dir(dir: &Path) -> Result<()> {
 }
 
 /// Write via a temp file and rename, so a crash leaves the old file or the new one.
-fn write_atomic(path: &Path, text: &str) -> Result<()> {
+fn write_atomic(path: &Path, data: impl AsRef<[u8]>) -> Result<()> {
     let tmp = path.with_extension("tmp");
-    fs::write(&tmp, text).with_context(|| format!("writing {}", tmp.display()))?;
+    fs::write(&tmp, data).with_context(|| format!("writing {}", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
 }
 
@@ -763,24 +1036,293 @@ mod tests {
         let roots = roots(&tmp);
         let keys = crypto::MemoryKeyStore::default();
         let mut p = roots.open(&Selection::Default, V).unwrap();
-        let key = p.unlock(Some(&keys)).unwrap().expect("a key");
+        let key = p.unlock(Some(&keys)).unwrap();
         let written = Manifest::read(&p.dir).unwrap().unwrap();
         assert_eq!(written.schema, SCHEMA_CRYPTO);
         assert!(written.crypto.is_some());
 
         let mut again = roots.open(&Selection::Default, V).unwrap();
-        let same = again.unlock(Some(&keys)).unwrap().expect("a key");
+        let same = again.unlock(Some(&keys)).unwrap();
         assert_eq!(same.check(), key.check());
     }
 
+    /// `profile.toml` as it was before the profile got its key: what a backup or a sync
+    /// conflict puts back.
+    fn roll_back_manifest(p: &Profile) {
+        let mut old = p.manifest.clone();
+        old.crypto = None;
+        old.schema = SCHEMA_PLAIN;
+        old.write(&p.dir).unwrap();
+    }
+
     #[test]
-    fn no_keychain_leaves_the_profile_plain() {
+    fn a_manifest_that_lost_its_crypto_takes_the_keychain_key_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let keys = crypto::MemoryKeyStore::default();
+        let mut p = roots.open(&Selection::Default, V).unwrap();
+        let key = p.unlock(Some(&keys)).unwrap();
+        // The databases are encrypted with that key by now.
+        fs::write(p.dir.join(Store::Cookies.file_name()), b"not SQLite at all, sixteen bytes and more").unwrap();
+        roll_back_manifest(&p);
+
+        let mut again = roots.open(&Selection::Default, V).unwrap();
+        assert!(again.manifest.crypto.is_none());
+        let same = again.unlock(Some(&keys)).unwrap();
+        assert_eq!(same.check(), key.check());
+        let written = Manifest::read(&p.dir).unwrap().unwrap();
+        assert_eq!(written.crypto.map(|c| c.check), Some(key.check()));
+        assert_eq!(written.schema, SCHEMA_CRYPTO);
+        // The keychain still holds the one key that opens the databases.
+        assert_eq!(keys.get(p.id(), Slot::Current).unwrap().unwrap().check(), key.check());
+    }
+
+    #[test]
+    fn encrypted_databases_without_a_key_anywhere_are_not_rekeyed() {
         let tmp = tempfile::tempdir().unwrap();
         let roots = roots(&tmp);
         let mut p = roots.open(&Selection::Default, V).unwrap();
-        assert!(p.unlock(None).unwrap().is_none());
+        p.unlock(Some(&crypto::MemoryKeyStore::default())).unwrap();
+        fs::write(p.dir.join(Store::Places.file_name()), b"not SQLite at all, sixteen bytes and more").unwrap();
+        roll_back_manifest(&p);
+
+        // Another machine: its keychain knows nothing of this profile.
+        let there = crypto::MemoryKeyStore::default();
+        let mut copy = roots.open(&Selection::Default, V).unwrap();
+        let err = copy.unlock(Some(&there)).unwrap_err();
+        assert!(err.to_string().contains("encrypted databases"), "{err}");
+        assert!(Manifest::read(&p.dir).unwrap().unwrap().crypto.is_none());
+        assert!(there.get(p.id(), Slot::Current).unwrap().is_none());
+
+        // Plaintext databases, or none, are what a new key is for.
+        fs::write(p.dir.join(Store::Places.file_name()), b"SQLite format 3\0 and a page of plaintext").unwrap();
+        fs::write(p.dir.join(Store::Cookies.file_name()), b"").unwrap();
+        let mut copy = roots.open(&Selection::Default, V).unwrap();
+        copy.unlock(Some(&there)).unwrap();
+        assert!(there.get(p.id(), Slot::Current).unwrap().is_some());
+    }
+
+    /// Stands in for SQLCipher: a store file holds the hex of the store key it is
+    /// "encrypted" with, and re-encrypting it swaps that for the new one.
+    fn fake_rekey(path: &Path, old: &Zeroizing<[u8; 32]>, new: &Zeroizing<[u8; 32]>) -> Result<()> {
+        let content = fs::read_to_string(path)?;
+        if content == crypto::hex(new.as_slice()) {
+            return Ok(());
+        }
+        if content == crypto::hex(old.as_slice()) {
+            fs::write(path, crypto::hex(new.as_slice()))?;
+            return Ok(());
+        }
+        bail!("{} opens with neither key", path.display())
+    }
+
+    fn seal_fake_stores(p: &Profile, key: &ProfileKey) {
+        for store in Store::ALL {
+            fs::write(p.dir.join(store.file_name()), crypto::hex(key.store_key(store).as_slice())).unwrap();
+        }
+    }
+
+    fn fake_stores_open_with(p: &Profile, key: &ProfileKey) -> bool {
+        Store::ALL
+            .iter()
+            .all(|store| fs::read_to_string(p.dir.join(store.file_name())).unwrap() == crypto::hex(key.store_key(*store).as_slice()))
+    }
+
+    #[test]
+    fn changing_or_removing_the_passphrase_moves_the_profile_to_a_new_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let keys = crypto::MemoryKeyStore::default();
+        let mut p = roots.open(&Selection::Default, V).unwrap();
+        let first = p.unlock(Some(&keys)).unwrap();
+        seal_fake_stores(&p, &first);
+        p.set_passphrase(&first, "old", crypto::TEST_KDF).unwrap();
+        // A second passphrase is a new key, never a re-wrap of the first.
+        assert!(p.set_passphrase(&first, "other", crypto::TEST_KDF).is_err());
+
+        let second = p.rotate_key(&keys, Some("new"), crypto::TEST_KDF, &mut fake_rekey).unwrap();
+        assert_ne!(second.check(), first.check());
+        assert!(fake_stores_open_with(&p, &second));
+        let written = Manifest::read(&p.dir).unwrap().unwrap();
+        assert_eq!(written.crypto.as_ref().unwrap().check, second.check());
+        // The old passphrase, from an old copy of the manifest, opens nothing now.
+        assert!(p.key_from_passphrase("old").is_err());
+        assert_eq!(p.key_from_passphrase("new").unwrap().check(), second.check());
+        assert_eq!(keys.get(p.id(), Slot::Current).unwrap().unwrap().check(), second.check());
+        assert!(keys.get(p.id(), Slot::Next).unwrap().is_none());
+        assert_eq!(p.unlock(Some(&keys)).unwrap().check(), second.check());
+
+        // Removing the passphrase rotates too, for the same reason.
+        let third = p.rotate_key(&keys, None, crypto::TEST_KDF, &mut fake_rekey).unwrap();
+        assert_ne!(third.check(), second.check());
+        assert!(fake_stores_open_with(&p, &third));
+        assert!(!p.has_passphrase());
+        assert!(p.key_from_passphrase("new").is_err());
+        assert_eq!(p.unlock(Some(&keys)).unwrap().check(), third.check());
+        assert!(p.rotate_key(&keys, Some(""), crypto::TEST_KDF, &mut fake_rekey).is_err());
+    }
+
+    #[test]
+    fn an_interrupted_rotation_blocks_the_profile_until_it_is_finished() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let keys = crypto::MemoryKeyStore::default();
+        let mut p = roots.open(&Selection::Default, V).unwrap();
+        let first = p.unlock(Some(&keys)).unwrap();
+        seal_fake_stores(&p, &first);
+        p.set_passphrase(&first, "pw", crypto::TEST_KDF).unwrap();
+
+        // The second store fails halfway: one store is on the new key, three on the old.
+        let mut calls = 0;
+        let mut failing = |path: &Path, old: &Zeroizing<[u8; 32]>, new: &Zeroizing<[u8; 32]>| {
+            calls += 1;
+            if calls == 2 {
+                bail!("disk full");
+            }
+            fake_rekey(path, old, new)
+        };
+        let err = p.rotate_key(&keys, Some("pw2"), crypto::TEST_KDF, &mut failing).unwrap_err();
+        assert!(format!("{err:#}").contains("disk full"), "{err:#}");
+        let next = keys.get(p.id(), Slot::Next).unwrap().expect("the new key waits in the next slot");
+        assert_eq!(Manifest::read(&p.dir).unwrap().unwrap().crypto.unwrap().check, first.check());
+        assert!(!fake_stores_open_with(&p, &first) && !fake_stores_open_with(&p, &next));
+
+        // Nothing opens it in that state, and the error says what to do.
+        let err = p.key_from(Some(&keys)).unwrap_err();
+        assert!(err.downcast_ref::<Rotating>().is_some(), "{err}");
+        assert!(p.unlock(Some(&keys)).unwrap_err().downcast_ref::<Rotating>().is_some());
+        assert!(p
+            .unlock_with_passphrase(&keys, "pw")
+            .unwrap_err()
+            .downcast_ref::<Rotating>()
+            .is_some());
+
+        // Trying again finishes with the key that was waiting, whatever passphrase is given now.
+        let done = p.rotate_key(&keys, None, crypto::TEST_KDF, &mut fake_rekey).unwrap();
+        assert_eq!(done.check(), next.check());
+        assert!(fake_stores_open_with(&p, &done));
+        assert!(keys.get(p.id(), Slot::Next).unwrap().is_none());
+        assert_eq!(p.unlock(Some(&keys)).unwrap().check(), done.check());
+        assert!(!p.has_passphrase());
+    }
+
+    #[test]
+    fn a_folder_whose_manifest_is_gone_is_not_given_a_new_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let dir = tmp.path().join("copied");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(Store::Places.file_name()), b"not SQLite at all, sixteen bytes and more").unwrap();
+        let err = roots.open(&Selection::Dir(dir.clone()), V).unwrap_err();
+        assert!(err.to_string().contains(MANIFEST), "{err}");
+        assert!(!dir.join(MANIFEST).exists());
+    }
+
+    #[test]
+    fn the_small_files_are_sealed_and_plaintext_ones_still_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let keys = crypto::MemoryKeyStore::default();
+        let mut p = roots.open(&Selection::Default, V).unwrap();
+        let key = p.unlock(Some(&keys)).unwrap();
+        assert_eq!(p.read_sealed(&key, "session.tabs").unwrap(), None);
+
+        p.write_sealed(&key, "session.tabs", b"*https://example.org/\n").unwrap();
+        let on_disk = fs::read(p.dir.join("session.tabs")).unwrap();
+        assert!(crypto::is_sealed(&on_disk) && !on_disk.windows(7).any(|w| w == b"example"));
+        assert_eq!(p.read_sealed(&key, "session.tabs").unwrap().unwrap(), b"*https://example.org/\n");
+        assert!(p.read_sealed(&ProfileKey::generate(p.id()), "session.tabs").is_err());
+
+        // A file from before sealing reads as it is, and the first keyed start seals it.
+        fs::write(p.dir.join("picker-clock.txt"), "12\n").unwrap();
+        assert_eq!(p.read_sealed(&key, "picker-clock.txt").unwrap().unwrap(), b"12\n");
+        p.seal_plaintext_files(&key).unwrap();
+        assert!(crypto::is_sealed(&fs::read(p.dir.join("picker-clock.txt")).unwrap()));
+        assert_eq!(p.read_sealed(&key, "picker-clock.txt").unwrap().unwrap(), b"12\n");
+        // Sealed already: left as it is.
+        let before = fs::read(p.dir.join("session.tabs")).unwrap();
+        p.seal_plaintext_files(&key).unwrap();
+        assert_eq!(fs::read(p.dir.join("session.tabs")).unwrap(), before);
+    }
+
+    #[test]
+    fn a_rotation_reseals_the_small_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let keys = crypto::MemoryKeyStore::default();
+        let mut p = roots.open(&Selection::Default, V).unwrap();
+        let first = p.unlock(Some(&keys)).unwrap();
+        seal_fake_stores(&p, &first);
+        p.set_passphrase(&first, "pw", crypto::TEST_KDF).unwrap();
+        p.write_sealed(&first, "session.tabs", b"*https://example.org/\n").unwrap();
+        fs::write(p.dir.join("picker-swatches.txt"), "#ff0000\n").unwrap();
+
+        let second = p.rotate_key(&keys, None, crypto::TEST_KDF, &mut fake_rekey).unwrap();
+        assert!(p.read_sealed(&first, "session.tabs").is_err());
+        assert_eq!(p.read_sealed(&second, "session.tabs").unwrap().unwrap(), b"*https://example.org/\n");
+        assert!(crypto::is_sealed(&fs::read(p.dir.join("picker-swatches.txt")).unwrap()));
+        assert_eq!(p.read_sealed(&second, "picker-swatches.txt").unwrap().unwrap(), b"#ff0000\n");
+        assert_eq!(p.read_sealed(&second, "picker-clock.txt").unwrap(), None);
+    }
+
+    #[test]
+    fn a_rolled_back_manifest_does_not_settle_an_interrupted_rotation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let keys = crypto::MemoryKeyStore::default();
+        let mut p = roots.open(&Selection::Default, V).unwrap();
+        let first = p.unlock(Some(&keys)).unwrap();
+        seal_fake_stores(&p, &first);
+        p.set_passphrase(&first, "pw", crypto::TEST_KDF).unwrap();
+        let mut failing = |_: &Path, _: &Zeroizing<[u8; 32]>, _: &Zeroizing<[u8; 32]>| -> Result<()> { bail!("disk full") };
+        p.rotate_key(&keys, Some("pw2"), crypto::TEST_KDF, &mut failing).unwrap_err();
+        // The manifest from before encryption comes back while the next key still waits.
+        roll_back_manifest(&p);
+        let mut again = roots.open(&Selection::Default, V).unwrap();
+        let err = again.unlock(Some(&keys)).unwrap_err();
+        assert!(err.downcast_ref::<Rotating>().is_some(), "{err}");
+        assert!(Manifest::read(&p.dir).unwrap().unwrap().crypto.is_none());
+
+        // The retry still gets through: both keys are in the keychain, and the manifest
+        // gets its `[crypto]` back from the new one.
+        let next = keys.get(p.id(), Slot::Next).unwrap().unwrap();
+        let done = again.rotate_key(&keys, Some("pw3"), crypto::TEST_KDF, &mut fake_rekey).unwrap();
+        assert_eq!(done.check(), next.check());
+        assert!(fake_stores_open_with(&p, &done));
+        let written = Manifest::read(&p.dir).unwrap().unwrap();
+        assert_eq!(
+            (written.schema, written.crypto.as_ref().map(|c| c.check.clone())),
+            (SCHEMA_CRYPTO, Some(done.check()))
+        );
+        assert!(keys.get(p.id(), Slot::Next).unwrap().is_none());
+        let mut opened = roots.open(&Selection::Default, V).unwrap();
+        assert_eq!(opened.unlock(Some(&keys)).unwrap().check(), done.check());
+        assert_eq!(opened.key_from_passphrase("pw3").unwrap().check(), done.check());
+    }
+
+    #[test]
+    fn a_rotation_needs_the_profiles_own_key_here() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let keys = crypto::MemoryKeyStore::default();
+        let mut p = roots.open(&Selection::Default, V).unwrap();
+        let key = p.unlock(Some(&keys)).unwrap();
+        seal_fake_stores(&p, &key);
+        keys.set(&ProfileKey::generate(p.id()), Slot::Current).unwrap();
+        let err = p.rotate_key(&keys, Some("pw"), crypto::TEST_KDF, &mut fake_rekey).unwrap_err();
+        assert!(err.downcast_ref::<Locked>().unwrap().stale);
+        assert!(fake_stores_open_with(&p, &key));
+        assert!(keys.get(p.id(), Slot::Next).unwrap().is_none());
+    }
+
+    #[test]
+    fn without_a_keychain_the_profile_does_not_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let roots = roots(&tmp);
+        let mut p = roots.open(&Selection::Default, V).unwrap();
+        assert!(p.unlock(None).is_err());
         let refusing = crypto::MemoryKeyStore::refusing();
-        assert!(p.unlock(Some(&refusing)).unwrap().is_none());
+        assert!(p.unlock(Some(&refusing)).is_err());
         let written = Manifest::read(&p.dir).unwrap().unwrap();
         assert_eq!((written.schema, written.crypto), (SCHEMA_PLAIN, None));
     }
@@ -791,7 +1333,7 @@ mod tests {
         let roots = roots(&tmp);
         let here = crypto::MemoryKeyStore::default();
         let mut p = roots.open(&Selection::Default, V).unwrap();
-        let key = p.unlock(Some(&here)).unwrap().unwrap();
+        let key = p.unlock(Some(&here)).unwrap();
 
         // Another machine, no passphrase yet: nothing opens it.
         let there = crypto::MemoryKeyStore::default();
@@ -805,27 +1347,27 @@ mod tests {
         assert!(copy.unlock(Some(&there)).unwrap_err().downcast_ref::<Locked>().unwrap().passphrase);
         assert!(copy.unlock_with_passphrase(&there, "wrong").is_err());
         copy.unlock_with_passphrase(&there, "hunter2").unwrap();
-        assert_eq!(copy.unlock(Some(&there)).unwrap().unwrap().check(), key.check());
+        assert_eq!(copy.unlock(Some(&there)).unwrap().check(), key.check());
     }
 
     #[test]
     fn a_passphrase_unlock_into_a_keychain_that_loses_the_key_fails() {
         struct Forgetful;
         impl KeyStore for Forgetful {
-            fn get(&self, _profile: Uuid) -> Result<Option<ProfileKey>> {
+            fn get(&self, _profile: Uuid, _slot: Slot) -> Result<Option<ProfileKey>> {
                 Ok(None)
             }
-            fn set(&self, _key: &ProfileKey) -> Result<()> {
+            fn set(&self, _key: &ProfileKey, _slot: Slot) -> Result<()> {
                 Ok(())
             }
-            fn delete(&self, _profile: Uuid) -> Result<()> {
+            fn delete(&self, _profile: Uuid, _slot: Slot) -> Result<()> {
                 Ok(())
             }
         }
         let tmp = tempfile::tempdir().unwrap();
         let roots = roots(&tmp);
         let mut p = roots.open(&Selection::Default, V).unwrap();
-        let key = p.unlock(Some(&crypto::MemoryKeyStore::default())).unwrap().unwrap();
+        let key = p.unlock(Some(&crypto::MemoryKeyStore::default())).unwrap();
         p.set_passphrase(&key, "pw", crypto::TEST_KDF).unwrap();
         assert_eq!(p.key_from_passphrase("pw").unwrap().check(), key.check());
         assert!(p.key_from_passphrase("wrong").is_err());
@@ -852,25 +1394,21 @@ mod tests {
         let roots = roots(&tmp);
         let keys = crypto::MemoryKeyStore::default();
         let mut p = roots.open(&Selection::Default, V).unwrap();
-        p.unlock(Some(&keys)).unwrap().unwrap();
-        keys.set(&ProfileKey::generate(p.id())).unwrap();
+        p.unlock(Some(&keys)).unwrap();
+        keys.set(&ProfileKey::generate(p.id()), Slot::Current).unwrap();
         let err = p.unlock(Some(&keys)).unwrap_err();
         assert!(err.downcast_ref::<Locked>().unwrap().stale);
     }
 
     #[test]
-    fn removing_the_passphrase_keeps_the_keychain_key() {
+    fn an_empty_passphrase_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
         let roots = roots(&tmp);
         let keys = crypto::MemoryKeyStore::default();
         let mut p = roots.open(&Selection::Default, V).unwrap();
-        let key = p.unlock(Some(&keys)).unwrap().unwrap();
+        let key = p.unlock(Some(&keys)).unwrap();
         assert!(p.set_passphrase(&key, "", crypto::TEST_KDF).is_err());
-        p.set_passphrase(&key, "pw", crypto::TEST_KDF).unwrap();
-        p.remove_passphrase().unwrap();
-        let written = Manifest::read(&p.dir).unwrap().unwrap();
-        assert!(written.crypto.unwrap().passphrase.is_none());
-        assert!(p.unlock(Some(&keys)).unwrap().is_some());
+        assert!(!p.has_passphrase());
     }
 
     #[cfg(unix)]

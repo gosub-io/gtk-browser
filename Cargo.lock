@@ -856,14 +856,18 @@ dependencies = [
  "anyhow",
  "argon2",
  "chacha20poly1305",
+ "core-foundation 0.9.4",
  "dirs",
  "hkdf",
  "keyring",
  "log",
+ "security-framework 2.11.1",
+ "security-framework-sys",
  "serde",
  "sha2 0.10.9",
  "tempfile",
  "toml",
+ "unicode-normalization",
  "uuid",
  "zeroize",
 ]
@@ -875,7 +879,10 @@ dependencies = [
  "anyhow",
  "beacon-profile",
  "clap",
+ "gosub_engine",
  "rpassword",
+ "rusqlite",
+ "tempfile",
  "zeroize",
 ]
 
@@ -4160,8 +4167,6 @@ dependencies = [
  "dbus-secret-service",
  "log",
  "secret-service",
- "security-framework 2.11.1",
- "security-framework 3.7.0",
  "windows-sys 0.60.2",
  "zbus 4.4.0",
  "zeroize",
@@ -7540,6 +7545,15 @@ name = "unicode-linebreak"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-script"
