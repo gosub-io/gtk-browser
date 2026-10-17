@@ -70,8 +70,9 @@ fn key_store() -> Option<Box<dyn KeyStore>> {
 }
 
 /// The profile this process runs. Resolves it on first use for hosts that never call
-/// [`init`] (the C ABI); a profile that cannot be opened ends the process, since running
-/// without one would write the databases somewhere unintended.
+/// [`init`]; a profile that cannot be opened ends the process, since running without one
+/// would write the databases somewhere unintended. The engine reaches it only after
+/// [`lock_profile`], which reports that error instead.
 pub fn profile() -> &'static Profile {
     match init() {
         Ok(profile) => profile,
@@ -110,7 +111,9 @@ pub fn lock_profile() -> anyhow::Result<()> {
     if LOCK.get().is_some() {
         return Ok(());
     }
-    let lock = profile().lock()?;
+    // `init`, not `profile`: a host on the C ABI gets here first, and a profile that cannot
+    // be opened must come back as an error (`beacon_new` returns NULL), not end its process.
+    let lock = init()?.lock()?;
     let _ = LOCK.set(lock);
     Ok(())
 }

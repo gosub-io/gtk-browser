@@ -116,11 +116,27 @@ pub fn run() {
 /// already running. The default profile keeps the plain id the desktop file and Flatpak use.
 fn app_id() -> String {
     if beacon_core::paths::is_default() {
-        APP_ID.to_string()
-    } else {
-        // D-Bus name elements may not start with a digit, hence the prefix.
-        format!("{APP_ID}.Profile{}", beacon_core::paths::profile().id().simple())
+        return APP_ID.to_string();
     }
+    // D-Bus name elements may not start with a digit, hence the prefixes.
+    let id = format!("{APP_ID}.Profile{}", beacon_core::paths::profile().id().simple());
+    match &beacon_core::cli::Cli::global().user_data_dir {
+        // A copied folder keeps its manifest, id and all: the folder itself tells two
+        // copies apart, or the second would open as a window of the first.
+        Some(dir) => {
+            let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+            format!("{id}.Dir{:016x}", fnv1a(dir.as_os_str().as_encoded_bytes()))
+        }
+        None => id,
+    }
+}
+
+/// FNV-1a, 64 bits: the same for a folder in every build, which `DefaultHasher` does not
+/// promise.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, b| {
+        (hash ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 fn load_css() {
