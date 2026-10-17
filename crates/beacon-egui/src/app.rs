@@ -759,7 +759,10 @@ impl BeaconApp {
             return;
         }
         let name = download_name(suggested);
-        let path = free_path(&dir, &name);
+        // A download's file appears only once the engine starts writing it, so the paths of
+        // the ones already handed out count as taken too.
+        let reserved: Vec<_> = self.beacon.downloads().entries().iter().map(|e| e.path.clone()).collect();
+        let path = free_path(&dir, &name, &reserved);
         let downloads = self.beacon.downloads_mut();
         let id = downloads.next_id();
         downloads.start(id, name, path.clone());
@@ -867,9 +870,10 @@ fn download_name(suggested: &str) -> String {
 
 /// `dir/name`, or `dir/name (2)` and up when that is taken, the number before the extension.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-fn free_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+fn free_path(dir: &std::path::Path, name: &str, reserved: &[std::path::PathBuf]) -> std::path::PathBuf {
+    let free = |p: &std::path::Path| !p.exists() && !reserved.iter().any(|r| r == p);
     let path = dir.join(name);
-    if !path.exists() {
+    if free(&path) {
         return path;
     }
     let (stem, ext) = match name.rsplit_once('.') {
@@ -878,7 +882,7 @@ fn free_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     };
     (2..)
         .map(|n| dir.join(format!("{stem} ({n}){ext}")))
-        .find(|p| !p.exists())
+        .find(|p| free(p))
         .unwrap_or(path)
 }
 
@@ -1541,13 +1545,15 @@ mod tests {
     fn a_taken_name_gets_a_number_before_its_extension() {
         let dir = std::env::temp_dir().join(format!("beacon-free-path-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(free_path(&dir, "a.pdf"), dir.join("a.pdf"));
+        assert_eq!(free_path(&dir, "a.pdf", &[]), dir.join("a.pdf"));
         std::fs::write(dir.join("a.pdf"), b"").unwrap();
-        assert_eq!(free_path(&dir, "a.pdf"), dir.join("a (2).pdf"));
+        assert_eq!(free_path(&dir, "a.pdf", &[]), dir.join("a (2).pdf"));
         std::fs::write(dir.join("a (2).pdf"), b"").unwrap();
-        assert_eq!(free_path(&dir, "a.pdf"), dir.join("a (3).pdf"));
+        assert_eq!(free_path(&dir, "a.pdf", &[]), dir.join("a (3).pdf"));
         std::fs::write(dir.join("notes"), b"").unwrap();
-        assert_eq!(free_path(&dir, "notes"), dir.join("notes (2)"));
+        assert_eq!(free_path(&dir, "notes", &[]), dir.join("notes (2)"));
+        // A name handed to a download that has not created its file yet is taken as well.
+        assert_eq!(free_path(&dir, "b.zip", &[dir.join("b.zip")]), dir.join("b (2).zip"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

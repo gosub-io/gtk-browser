@@ -76,8 +76,8 @@ if ! command -v javac >/dev/null; then
     exit 1
 fi
 mkdir -p "$STAGE/java/helper"
-javac --release 11 -nowarn -classpath "$PLATFORM/android.jar" -d "$STAGE/java/helper" \
-    $(find "$ROOT/packaging/android/java" -name '*.java')
+find "$ROOT/packaging/android/java" -name '*.java' -print0 |
+    xargs -0 javac --release 11 -nowarn -classpath "$PLATFORM/android.jar" -d "$STAGE/java/helper"
 (cd "$STAGE/java/helper" && jar cf "$STAGE/java/helper.jar" .)
 
 "$BUILD_TOOLS/d8" --release --min-api "$MIN_SDK" --lib "$PLATFORM/android.jar" \

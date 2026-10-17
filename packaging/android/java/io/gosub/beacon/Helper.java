@@ -19,9 +19,11 @@ import android.widget.DatePicker;
 import android.widget.TimePicker;
 
 import java.io.FileInputStream;
-import java.util.Calendar;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Calendar;
+import java.util.Locale;
+import java.util.TimeZone;
 
 /**
  * What Beacon needs from Android that Rust cannot do on its own: a dialog needs a listener
@@ -42,8 +44,8 @@ public final class Helper {
 
     /**
      * Open a date picker at year, month (0-based, as Android counts) and day, or at today for
-     * a negative year. The bounds are epoch milliseconds, Long.MIN_VALUE for none. The answer
-     * is "y m d" with a 0-based month.
+     * a negative year. The bounds are epoch milliseconds of a day's noon UTC, Long.MIN_VALUE
+     * for none. The answer is "y m d" with a 0-based month.
      */
     public static void showDatePicker(final Activity activity, int y0, int m0, int d0,
             final long minMillis, final long maxMillis) {
@@ -67,15 +69,28 @@ public final class Helper {
                     }
                 }, year, month, day);
                 if (minMillis != Long.MIN_VALUE) {
-                    dialog.getDatePicker().setMinDate(minMillis);
+                    dialog.getDatePicker().setMinDate(localNoon(minMillis));
                 }
                 if (maxMillis != Long.MIN_VALUE) {
-                    dialog.getDatePicker().setMaxDate(maxMillis);
+                    dialog.getDatePicker().setMaxDate(localNoon(maxMillis));
                 }
                 dialog.setOnDismissListener(cancelOnDismiss(serial));
                 dialog.show();
             }
         });
+    }
+
+    /**
+     * The same calendar date as a noon UTC, at noon in the phone's own zone: the dialog reads
+     * its bounds in that zone, where noon UTC is the next day from UTC+12 on.
+     */
+    private static long localNoon(long utcNoonMillis) {
+        Calendar utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+        utc.setTimeInMillis(utcNoonMillis);
+        Calendar local = Calendar.getInstance();
+        local.clear();
+        local.set(utc.get(Calendar.YEAR), utc.get(Calendar.MONTH), utc.get(Calendar.DAY_OF_MONTH), 12, 0);
+        return local.getTimeInMillis();
     }
 
     /** Open a time picker at hour and minute, or at now for a negative hour. The answer is "h m". */
@@ -201,7 +216,7 @@ public final class Helper {
     private static String mimeTypeOf(String name) {
         int dot = name.lastIndexOf('.');
         if (dot >= 0) {
-            String type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substring(dot + 1).toLowerCase());
+            String type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substring(dot + 1).toLowerCase(Locale.ROOT));
             if (type != null) {
                 return type;
             }

@@ -23,13 +23,23 @@ pub struct Time {
     pub minute: u32,
 }
 
-/// `YYYY-MM-DD`, or `None` for anything else (an empty value included).
+/// `YYYY-MM-DD` naming a day that exists, or `None` for anything else (an empty value and
+/// `2026-02-31` included). `min` and `max` reach here unsanitised, and HTML drops an invalid
+/// bound rather than rolling it into the next month.
 pub fn parse_date(value: &str) -> Option<Date> {
     let mut parts = value.splitn(3, '-');
-    let year = parts.next()?.parse().ok()?;
+    let year: i32 = parts.next()?.parse().ok()?;
     let month = parts.next()?.parse().ok()?;
     let day = parts.next()?.parse().ok()?;
-    ((1..=12).contains(&month) && (1..=31).contains(&day)).then_some(Date { year, month, day })
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    (year > 0 && (1..=days_in_month).contains(&day)).then_some(Date { year, month, day })
 }
 
 /// `HH:MM`, with any seconds after it ignored.
@@ -56,9 +66,9 @@ pub fn format_time(time: Time) -> String {
     format!("{:02}:{:02}", time.hour, time.minute)
 }
 
-/// A `min` or `max` attribute as the epoch milliseconds of that day's noon UTC. Noon, so the
-/// dialog, which reads the bound in the phone's own time zone, lands on the same day in any
-/// zone within 12 hours of UTC.
+/// A `min` or `max` attribute as the epoch milliseconds of that day's noon UTC. The Java
+/// helper moves it to noon of the same date in the phone's own zone, which the dialog reads
+/// it in.
 pub fn bound_millis(value: Option<&str>) -> Option<i64> {
     let date = parse_date(value?)?;
     Some((days_from_civil(date) * 86_400 + 12 * 3_600) * 1_000)
@@ -119,9 +129,20 @@ mod tests {
     fn an_empty_or_broken_value_is_no_date() {
         assert_eq!(parse_date(""), None);
         assert_eq!(parse_date("2026-13-01"), None);
+        assert_eq!(parse_date("2026-02-31"), None);
+        assert_eq!(parse_date("2026-02-29"), None);
+        assert_eq!(parse_date("2026-04-31"), None);
+        assert_eq!(parse_date("0000-01-01"), None);
         assert_eq!(parse_date("yesterday"), None);
         assert_eq!(parse_time(""), None);
         assert_eq!(parse_time("24:00"), None);
+    }
+
+    #[test]
+    fn a_leap_day_is_a_date() {
+        assert!(parse_date("2024-02-29").is_some());
+        assert!(parse_date("2000-02-29").is_some());
+        assert_eq!(parse_date("1900-02-29"), None);
     }
 
     #[test]
