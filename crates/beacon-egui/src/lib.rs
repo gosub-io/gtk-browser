@@ -12,6 +12,7 @@ mod app;
 mod chrome;
 mod context;
 mod dive;
+mod picker_value;
 mod platform;
 
 use std::sync::OnceLock;

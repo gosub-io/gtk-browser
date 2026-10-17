@@ -6,10 +6,13 @@
 //! There is no stderr either, so the log goes to logcat. And there are no component
 //! processes: the engine runs in-process, as it does whenever isolation is off.
 
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use beacon_core::cli::Cli;
 use winit::platform::android::activity::AndroidApp;
+
+pub mod helper;
 
 static APP: OnceLock<AndroidApp> = OnceLock::new();
 
@@ -102,6 +105,12 @@ pub fn move_to_background() {
     if let Err(e) = result {
         log::warn!("cannot move Beacon to the background: {e}");
     }
+}
+
+/// Where a download is written while it runs: the app's own storage, which needs no
+/// permission. A finished one is copied to the shared Downloads folder from here.
+pub fn download_dir() -> Option<PathBuf> {
+    Some(APP.get()?.internal_data_path()?.join("downloads"))
 }
 
 /// The part of the screen the app may draw in, in physical pixels: the window minus the
