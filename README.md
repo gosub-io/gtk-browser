@@ -2,9 +2,10 @@
 
 Beacon is a browser built on the [Gosub engine](https://github.com/gosub-io/gosub-engine).
 The engine does the actual work (networking, cookies, storage, history, rendering); Beacon
-is the native chrome around it: a GTK4 shell on Linux and a Swift/AppKit shell on macOS,
-both over the same Rust core. It exists to test the engine in a real application, so
-don't expect a daily driver — but basic browsing works.
+is the native chrome around it: a GTK4 shell on Linux, a Swift/AppKit shell on macOS, a
+C#/WPF shell on Windows and an egui app on Android, all over the same Rust core. It
+exists to test the engine in a real application, so don't expect a daily driver, but basic
+browsing works.
 
 ![Gosub Beacon with three tabs loaded](./docs/screenshots/beacon-2026-08.png)
 
@@ -15,13 +16,20 @@ More in [docs/screenshots](./docs/screenshots/).
 - **Linux**: the GTK shell, the most complete one. It is also packaged as a Flatpak,
   which brings its own GTK and so runs on distributions whose GTK is too old; see
   [packaging/flatpak](./packaging/flatpak/README.md). A second, minimal frontend in egui
-  (Vello on wgpu, no GTK or Skia) does tabs, navigation and rendering and little else.
+  (Vello on wgpu, no GTK or Skia) does tabs, navigation and rendering and little else;
+  it is also the Android app.
 - **macOS**: a native Swift/AppKit shell in [swift/](./swift/README.md), over the C ABI in
   `crates/beacon-ffi`. Signed and notarized DMGs are published at
   [gosub.io/build](https://gosub.io/build).
 - **Windows**: a C#/WPF shell in [windows/](./windows/README.md), over the same C ABI.
   It renders on the CPU (Skia), not the GPU. Both halves cross-compile from Linux with
-  `windows/build.sh`; running it needs Windows.
+  `windows/build.sh`; running it needs Windows. Not built in CI.
+- **Android**: the egui frontend as a NativeActivity (`crates/beacon-android`), built into
+  a debug-signed arm64 APK by `scripts/android-apk.sh`. Android 8.0 (API 26) and newer.
+  On top of the desktop egui it has downloads (copied into the shared Downloads folder on
+  Android 10 and newer; older versions keep them in the app's own storage) and the system
+  date and time pickers for form inputs. The engine runs in-process, without component
+  isolation. Not built in CI.
 
 ## Getting the source
 
@@ -80,13 +88,46 @@ draw and stays blank. `swift/package.sh` turns the build into a universal (arm64
 x86_64) `.app` and DMG; that, and everything else about the Mac shell, is in
 [swift/README.md](./swift/README.md).
 
+## Building on Windows
+
+The Windows shell is built from Linux: `./windows/build.sh` (or `./windows/build.sh
+release`) cross-compiles the Rust C ABI with `cargo-xwin` and the WPF app with the .NET
+SDK. Prerequisites, how to run it and why it renders on the CPU are in
+[windows/README.md](./windows/README.md).
+
+## Building and running on Android
+
+The APK is also built from Linux. Besides Rust you need the Android SDK (a platform and
+build-tools), the NDK, a JDK for `javac`, and:
+
+```bash
+cargo install cargo-ndk
+rustup target add aarch64-linux-android
+```
+
+`ANDROID_HOME` defaults to `~/Android/Sdk` and `ANDROID_NDK_HOME` to the newest NDK under
+it. Then:
+
+```bash
+scripts/android-apk.sh              # release build, debug-signed: target/android/gosub-beacon.apk
+scripts/android-apk.sh --install    # also installs it over adb and starts it
+scripts/android-apk.sh --debug      # debug profile instead of release
+adb logcat -s beacon RustStdoutStderr   # the log; RUST_LOG cannot be set for an app
+```
+
+The script downloads two pinned jars on first use (the Java half of
+rustls-platform-verifier, which HTTPS needs on Android, and the Kotlin standard library it
+depends on). It stops with a message when `Cargo.lock` moves to a verifier version the pin
+does not cover; update the version and checksum in the script then.
+
 ## Development
 
 `make test` runs the unit tests, clippy and the format check; `make fix-format` applies
 `cargo fmt` and clippy's fixes. CI runs the same on Ubuntu, builds and tests the isolation
 build under Xvfb (`scripts/isolation-smoke.sh`; see [docs/isolation.md](docs/isolation.md)),
 and on `macos-14` builds the egui frontend, the C ABI with a headless C consumer, and the
-Swift app.
+Swift app. The Windows and Android builds are not in CI; build them by hand when you
+touch the C ABI or `beacon-egui`.
 
 ## Running in a container
 
